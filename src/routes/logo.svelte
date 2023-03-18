@@ -1,28 +1,31 @@
 <script lang="ts">
-    import {
-        fade,
-        draw,
-        type DrawParams,
-        type FadeParams,
-    } from "svelte/transition";
+    import { cubicOut, cubicIn } from "svelte/easing";
+    import { draw, fade } from "svelte/transition";
 
     export let width = "400";
+    export let stroke = "#ffffff";
+    export let accentColor = "#EB1C76";
 
-    export let points_stage_0: FadeParams;
-    export let points_stage_1: FadeParams;
-    export let lines_stage_1: DrawParams;
-    export let lines_stage_2: DrawParams;
+    let points_stage_0 = { delay: 100, duration: 1400 };
+    let reverse_points_stage_2 = { delay: 2000 };
 
-    const color = "#FFFFFF";
-    const colorAccent = "#EB1C76";
+    let points_stage_1 = { delay: 1600 };
+    let reverse_points_stage_1 = { delay: 1000 };
+
+    let lines_stage_1 = { delay: 1500, easing: cubicOut };
+    let reverse_lines_stage_1 = { delay: 1000, easing: cubicIn };
+
+    let lines_stage_2 = { delay: 2000, duration: 2000, easing: cubicOut };
+    let reverse_lines_stage_0 = { delay: 100, duration: 1000, easing: cubicIn };
 </script>
 
-<svg {width} viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
+<svg {stroke} {width} viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
     <g>
         <!-- Left Top -->
         <line
             in:draw={lines_stage_2}
-            stroke={colorAccent}
+            out:draw={reverse_lines_stage_0}
+            stroke={accentColor}
             stroke-linecap="round"
             stroke-width="26"
             y1="112.5"
@@ -34,7 +37,7 @@
         <!-- Left Bottom -->
         <line
             in:draw={lines_stage_1}
-            stroke={color}
+            out:draw={reverse_lines_stage_1}
             stroke-linecap="round"
             stroke-width="26"
             y1="400"
@@ -46,7 +49,7 @@
         <!-- Middle -->
         <line
             in:draw={lines_stage_1}
-            stroke={color}
+            out:draw={reverse_lines_stage_1}
             stroke-linecap="round"
             stroke-width="26"
             y1="380"
@@ -58,7 +61,7 @@
         <!-- Right Top -->
         <line
             in:draw={lines_stage_1}
-            stroke={color}
+            out:draw={reverse_lines_stage_1}
             stroke-linecap="round"
             stroke-width="26"
             y1="405"
@@ -70,7 +73,8 @@
         <!-- Right Middle -->
         <line
             in:draw={lines_stage_2}
-            stroke={colorAccent}
+            out:draw={reverse_lines_stage_0}
+            stroke={accentColor}
             stroke-linecap="round"
             stroke-width="26"
             y1="485"
@@ -82,7 +86,7 @@
         <!-- Right Bottom -->
         <line
             in:draw={lines_stage_1}
-            stroke={color}
+            out:draw={reverse_lines_stage_1}
             stroke-linecap="round"
             stroke-width="26"
             y1="440"
@@ -95,7 +99,8 @@
         <!-- Left Top Mirror -->
         <line
             in:draw={lines_stage_2}
-            stroke={colorAccent}
+            out:draw={reverse_lines_stage_0}
+            stroke={accentColor}
             stroke-linecap="round"
             stroke-width="26"
             y2="112.5"
@@ -107,7 +112,8 @@
         <!-- Right Middle Mirror -->
         <line
             in:draw={lines_stage_2}
-            stroke={colorAccent}
+            out:draw={reverse_lines_stage_0}
+            stroke={accentColor}
             stroke-linecap="round"
             stroke-width="26"
             y2="485"
@@ -120,7 +126,7 @@
         <!-- Left Top -->
         <ellipse
             in:fade={points_stage_1}
-            stroke={color}
+            out:fade={reverse_points_stage_1}
             ry="7"
             rx="7"
             cy="100"
@@ -131,7 +137,8 @@
         <!-- Left Bottom -->
         <ellipse
             in:fade={points_stage_1}
-            stroke={color}
+            out:fade={reverse_points_stage_1}
+            stroke={accentColor}
             ry="7"
             rx="7"
             cy="220"
@@ -142,7 +149,8 @@
         <!-- Middle -->
         <ellipse
             in:fade={points_stage_0}
-            stroke={colorAccent}
+            out:fade={reverse_points_stage_2}
+            stroke={accentColor}
             ry="7"
             rx="7"
             cy="420"
@@ -153,7 +161,7 @@
         <!-- Right Top -->
         <ellipse
             in:fade={points_stage_1}
-            stroke={color}
+            out:fade={reverse_points_stage_1}
             ry="7"
             rx="7"
             cy="330"
@@ -164,7 +172,7 @@
         <!-- Right Bottom -->
         <ellipse
             in:fade={points_stage_1}
-            stroke={color}
+            out:fade={reverse_points_stage_1}
             ry="7"
             rx="7"
             cy="520"
