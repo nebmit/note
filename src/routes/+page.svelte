@@ -4,7 +4,6 @@
 
     import { waitMin } from "../util";
     import { logStore, userStore } from "./store";
-    import { setContext } from "svelte";
 
     let loading = false;
     let isLoggedIn = false;

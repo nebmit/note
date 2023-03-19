@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { fly, fade } from "svelte/transition";
     import { quintInOut } from "svelte/easing";
+    import { fade, fly } from "svelte/transition";
 
     import Logo from "./logo.svelte";
 
