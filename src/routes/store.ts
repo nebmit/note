@@ -9,5 +9,10 @@ export const logStore = {
             messages.push(message);
             return messages;
         });
+    },
+    clear: () => {
+        logsMessagesStore.set([]);
     }
 }
+
+export const userStore = writable(null as any);

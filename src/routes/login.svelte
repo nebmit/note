@@ -16,6 +16,9 @@
     let username = "";
     let password = "";
 
+    let username_error = false;
+    let password_error = false;
+
     let accentColor = error ? "#DC2626" : "#EB1C76";
 
     onMount(() => {
@@ -26,6 +29,21 @@
     });
 
     function attemptLogin(username: string, password: string): void {
+        let abort = false;
+        username_error = false;
+        password_error = false;
+        if (username.length < 3) {
+            username_error = true;
+            error = { message: "Please use more than 3 characters :)" };
+            abort = true;
+        }
+        if (password.length < 3) {
+            password_error = true;
+            error = { message: "Please use more than 3 characters :)" };
+            abort = true;
+        }
+
+        if (abort) return;
         login(username, password);
     }
 </script>
@@ -73,7 +91,9 @@
                         </div>
                     {/if}
                     <input
-                        class="border-b border-b-gray-300 bg-slate-400/10 p-2 m-2 outline-none text-white w-80"
+                        class="border-b border-b-gray-300 bg-slate-400/10 p-2 m-2 outline-none text-white w-80 {username_error
+                            ? 'border-b-red-500'
+                            : ''}"
                         type="text"
                         placeholder="Username"
                         bind:value={username}
@@ -95,7 +115,9 @@
                         }}
                     />
                     <input
-                        class="border-b border-b-gray-300 bg-slate-400/10 p-2 m-2 outline-none text-white w-80"
+                        class="border-b border-b-gray-300 bg-slate-400/10 p-2 m-2 outline-none text-white w-80 {password_error
+                            ? 'border-b-red-500'
+                            : ''}"
                         type="password"
                         placeholder="Password"
                         bind:value={password}
