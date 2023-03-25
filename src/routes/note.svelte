@@ -19,6 +19,7 @@
 
     let username = "";
     let disabled = true;
+    let redactSensitiveContent = true;
     let savestate = "loading...";
 
     let encryptionKey: CryptoKey | null = null;
@@ -45,7 +46,9 @@
         const password = userObj.password;
         const saltString = userObj.salt;
 
-        logStore.add(`attempting to derive key from password '${password}'`);
+        logStore.add(
+            `attempting to derive key from password '${redacted(password)}'`
+        );
 
         const encoder = new TextEncoder();
         const salt = encoder.encode(saltString);
@@ -54,7 +57,9 @@
             crypto.subtle.digest("SHA-256", encoder.encode(password)),
             500
         );
-        logStore.add(`hashed password: ${arrayBufferToString(passwordHash)}`);
+        logStore.add(
+            `hashed password: ${redacted(arrayBufferToString(passwordHash))}`
+        );
 
         const key: CryptoKey = await waitMin(
             crypto.subtle.importKey(
@@ -82,8 +87,8 @@
             500
         );
         logStore.add(
-            `derived encryption key using PBKDF2: ${arrayBufferToString(
-                derivedKey
+            `derived encryption key using PBKDF2: ${redacted(
+                arrayBufferToString(derivedKey)
             )}`
         );
 
@@ -101,7 +106,9 @@
         await wait(500);
         content = b64CipherText;
         logStore.add(
-            `extracted iv '${iv}' and ciphertext from encrypted content`
+            `extracted iv '${redacted(
+                iv
+            )}' and ciphertext from encrypted content`
         );
 
         const ciphertext = atob(b64CipherText);
@@ -192,7 +199,6 @@
         return () => {
             if (timer) clearTimeout(timer);
             savestate = "waiting...";
-            console.log("attempting to save...");
             timer = setTimeout(save, 1000);
         };
     }
@@ -200,12 +206,29 @@
     function attemptLogout() {
         logout();
     }
+
+    function redacted(message: string) {
+        return redactSensitiveContent
+            ? "***REDACTBEGIN" + message + "REDACTEND***"
+            : message;
+    }
+
+    function infiniteScroll(node: HTMLDivElement, args: string[]) {
+        const scroll = () =>
+            node.scroll({
+                top: node.scrollHeight,
+                behavior: "smooth",
+            });
+        scroll();
+
+        return { update: scroll };
+    }
 </script>
 
 {#if visible}
-    <div class="h-screen flex flex-col">
+    <div class="h-full flex flex-col flex-auto">
         <nav
-            class="flex flex-row justify-between items-center bg-slate-900 p-4"
+            class="lg:hidden flex flex-row justify-between items-center bg-slate-900 p-4"
             transition:fly={{
                 y: -10,
                 duration: 500,
@@ -213,24 +236,25 @@
         >
             <div class="flex flex-row items-center">
                 <img
-                    class="h-10 w-10 rounded-full"
+                    class="h-6 w-6 rounded-full"
                     src="favicon.ico"
                     alt="Logo"
                 />
                 <span
-                    class="text-2xl text-slate-100 ml-4 uppercase logo-name unselectable"
+                    class="text-slate-100 ml-4 uppercase logo-name unselectable"
                 >
                     Note
                 </span>
             </div>
             <button
-                class="bg-transparent text-red-600 rounded border border-red-600 hover:text-slate-100 hover:bg-red-600 p-1 px-2"
+                class="text-sm bg-transparent text-red-600 rounded hover:text-red-800"
                 on:click={attemptLogout}
             >
                 logout
             </button>
         </nav>
-        <svg width="100%" height="2">
+
+        <svg class="lg:hidden" width="100%" height="2">
             <g>
                 <line
                     x1="0"
@@ -253,27 +277,18 @@
             </g>
         </svg>
 
-        <div class="flex flex-row flex-1">
-            <div
-                class="hidden lg:inline basis-5/12 p-10"
-                transition:fly={{
-                    x: -100,
-                    delay: 500,
-                    duration: 2000,
-                }}
-            >
-                <div class=" bg-neutral-900 rounded-lg p-4">
-                    <span class="text-2xl text-white p-4"> console </span>
-                    <hr class="mb-2" />
-                    <div>
-                        {#each $logStore as message}
-                            <p class="text-lg console-message flex-wrap">
-                                {message}
-                            </p>
-                        {/each}
-                    </div>
-                </div>
+        <div class="flex flex-row h-full ">
+            <div class="hidden lg:flex h-full text-white p-4">
+                <ul>
+                    <li class="align-bottom">
+                        <button
+                            class="bg-transparent text-red-600 rounded border border-red-600 hover:text-slate-100 hover:bg-red-600 p-1 px-2"
+                            >Logout</button
+                        >
+                    </li>
+                </ul>
             </div>
+
             <div
                 class="basis-full lg:basis-7/12 p-5 lg:p-10 h-full"
                 transition:fade={{
@@ -303,6 +318,49 @@
                     />
                 </div>
             </div>
+            <div
+                class="hidden lg:flex flex-auto h-full  basis-5/12 p-10"
+                transition:fly={{
+                    x: -100,
+                    delay: 500,
+                    duration: 2000,
+                }}
+            >
+                <div
+                    class="flex flex-col flex-1 h-full  bg-neutral-900 rounded-lg p-4"
+                >
+                    <div class="flex flex-row justify-end items-center">
+                        <span class="grow text-2xl text-white p-4">
+                            console
+                        </span>
+                        <span class="text-white p-4">
+                            redact sensitive content
+                        </span>
+                        <input
+                            type="checkbox"
+                            bind:checked={redactSensitiveContent}
+                        />
+                    </div>
+                    <hr class="mb-2" />
+                    <div
+                        class="flex flex-col min-h-0 h-full flex-auto overflow-y-auto"
+                        use:infiniteScroll={$logStore}
+                    >
+                        {#each $logStore as message}
+                            <p class="text-lg console-message">
+                                {redactSensitiveContent
+                                    ? message.replaceAll(
+                                          /\*\*\*REDACTBEGIN.*REDACTEND\*\*\*/gm,
+                                          "[REDACTED]"
+                                      )
+                                    : message
+                                          .replaceAll(/\*\*\*REDACTBEGIN/gm, "")
+                                          .replaceAll(/REDACTEND\*\*\*/gm, "")}
+                            </p>
+                        {/each}
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 {/if}
@@ -324,10 +382,10 @@
         resize: none;
     }
     .logo-name {
-        font-size: 1.5rem;
+        font-size: 1rem;
         font-family: "Josefin Sans";
-        letter-spacing: 0.2em;
-        font-weight: 200;
+        letter-spacing: 0.1em;
+        font-weight: 300;
         color: theme(colors.slate.100);
     }
     .console-message {
