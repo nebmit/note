@@ -21,27 +21,21 @@
 
     let accentColor = error ? "#DC2626" : "#EB1C76";
 
-    onMount(() => {
+    onMount(async () => {
         loginVisible = true;
-        return () => {
-            loginVisible = false;
-        };
+        const response = await fetch("/api", {
+            method: "GET",
+        });
+        const obj = await response.json();
+        if (response.status === 200) {
+            username = obj.name;
+        }
     });
 
     function attemptLogin(username: string, password: string): void {
         let abort = false;
         username_error = false;
         password_error = false;
-        if (username.length < 3) {
-            username_error = true;
-            error = { message: "Please use more than 3 characters :)" };
-            abort = true;
-        }
-        if (password.length < 3) {
-            password_error = true;
-            error = { message: "Please use more than 3 characters :)" };
-            abort = true;
-        }
 
         if (abort) return;
         login(username, password);

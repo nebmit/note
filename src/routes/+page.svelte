@@ -9,6 +9,40 @@
     let isLoggedIn = false;
 
     let error: { message: string } | null = null;
+
+    async function login(username: string, password: string) {
+        loading = true;
+        logStore.clear();
+        logStore.add(`fetching content and salt for user '${username}'`);
+        const response = await waitMin(
+            fetch("/api?user=" + username, {
+                method: "GET",
+            }),
+            2000
+        );
+        if (response.status !== 200) {
+            error = { message: "User not found" };
+            setTimeout(() => {
+                loading = false;
+            }, 500);
+            return;
+        }
+        const obj = await response.json();
+        logStore.add(
+            `completed fetching content and salt for user '${username}'`
+        );
+        userStore.set({
+            name: username,
+            password: password,
+            salt: obj.salt,
+            content: obj.content,
+        });
+        isLoggedIn = true;
+
+        setTimeout(() => {
+            loading = false;
+        }, 500);
+    }
 </script>
 
 <title>Note | TBW</title>
@@ -27,40 +61,5 @@
         }}
     />
 {:else if !isLoggedIn && !loading}
-    <Login
-        login={async (username, password) => {
-            loading = true;
-            logStore.clear();
-            logStore.add(`fetching content and salt for user '${username}'`);
-            const response = await waitMin(
-                fetch("/api?user=" + username, {
-                    method: "GET",
-                }),
-                2000
-            );
-            if (response.status !== 200) {
-                error = { message: "User not found" };
-                setTimeout(() => {
-                    loading = false;
-                }, 500);
-                return;
-            }
-            const obj = await response.json();
-            logStore.add(
-                `completed fetching content and salt for user '${username}'`
-            );
-            userStore.set({
-                name: username,
-                password: password,
-                salt: obj.salt,
-                content: obj.content,
-            });
-            isLoggedIn = true;
-
-            setTimeout(() => {
-                loading = false;
-            }, 500);
-        }}
-        {error}
-    />
+    <Login {login} {error} />
 {/if}

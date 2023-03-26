@@ -145,9 +145,11 @@
             logStore.add(`sucessfully decrypted content locally`);
             document.getElementById("textarea")?.focus();
         } catch (e) {
+            savestate = "error";
+            content =
+                "Failed to decrypt content. Are you sure you entered the correct password?";
             logStore.add(`ERROR: failed to decrypt content`);
             logStore.add(`Are you sure you entered the correct password?`);
-            console.error(e);
             return;
         }
 
@@ -213,7 +215,7 @@
             : message;
     }
 
-    function infiniteScroll(node: HTMLDivElement, args: string[]) {
+    function scrollToNewMessages(node: HTMLDivElement, args: string[]) {
         const scroll = () =>
             node.scroll({
                 top: node.scrollHeight,
@@ -283,17 +285,20 @@
                     <li class="align-bottom">
                         <button
                             class="bg-transparent text-red-600 rounded border border-red-600 hover:text-slate-100 hover:bg-red-600 p-1 px-2"
-                            >Logout</button
+                            on:click={attemptLogout}
                         >
+                            Logout
+                        </button>
                     </li>
                 </ul>
             </div>
 
             <div
                 class="basis-full lg:basis-7/12 p-5 lg:p-10 h-full"
-                transition:fade={{
-                    delay: 1000,
-                    duration: 500,
+                transition:fly={{
+                    x: -50,
+                    delay: 500,
+                    duration: 2000,
                 }}
             >
                 <div
@@ -320,10 +325,9 @@
             </div>
             <div
                 class="hidden lg:flex flex-auto h-full  basis-5/12 p-10"
-                transition:fly={{
-                    x: -100,
-                    delay: 500,
-                    duration: 2000,
+                transition:fade={{
+                    delay: 1000,
+                    duration: 500,
                 }}
             >
                 <div
@@ -344,7 +348,7 @@
                     <hr class="mb-2" />
                     <div
                         class="flex flex-col min-h-0 h-full flex-auto overflow-y-auto"
-                        use:infiniteScroll={$logStore}
+                        use:scrollToNewMessages={$logStore}
                     >
                         {#each $logStore as message}
                             <p class="text-lg console-message">
