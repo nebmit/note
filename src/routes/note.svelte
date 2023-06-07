@@ -211,7 +211,9 @@
 
     function redacted(message: string) {
         return redactSensitiveContent
-            ? "***REDACTBEGIN" + message + "REDACTEND***"
+            ? "***REDACTBEGIN" +
+                  message.split("").join("\u200B") +
+                  "REDACTEND***"
             : message;
     }
 
@@ -279,7 +281,7 @@
             </g>
         </svg>
 
-        <div class="flex flex-row h-full ">
+        <div class="flex flex-row h-full">
             <div class="hidden lg:flex h-full text-white p-4">
                 <ul>
                     <li class="align-bottom">
@@ -324,14 +326,14 @@
                 </div>
             </div>
             <div
-                class="hidden lg:flex flex-auto h-full  basis-5/12 p-10"
+                class="hidden lg:flex flex-auto h-full basis-5/12 p-10"
                 transition:fade={{
                     delay: 1000,
                     duration: 500,
                 }}
             >
                 <div
-                    class="flex flex-col flex-1 h-full  bg-neutral-900 rounded-lg p-4"
+                    class="flex flex-col flex-1 h-full bg-neutral-900 rounded-lg p-4"
                 >
                     <div class="flex flex-row justify-end items-center">
                         <span class="grow text-2xl text-white p-4">
@@ -396,6 +398,8 @@
         color: theme(colors.slate.100);
         font: 1rem "Fira Code", monospace;
         padding: 0.5rem 0 0 0;
+        word-wrap: break-all;
+        overflow-wrap: break-all;
     }
     .unselectable {
         -webkit-touch-callout: none;
