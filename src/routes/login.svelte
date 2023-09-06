@@ -89,8 +89,12 @@
                         </div>
                     {/if}
                     {#if registerPrompt}
-                        <div class="flex justify-center">
-                            <span class="text-gray-500"
+                        <div
+                            class="flex justify-center"
+                            in:fade={{ delay: in_text_delay + 1000 }}
+                            out:fade={{ delay: out_text_delay }}
+                        >
+                            <span class="text-gray-500 text-center w-1/2"
                                 >Feel free to log in using any credentials. If
                                 they haven't been claimed by someone else,
                                 you're good to go. This is just a demo! :)</span
