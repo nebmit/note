@@ -25,6 +25,8 @@
 	},
 	"type": "module",
 	"dependencies": {
-		"dotenv": "^16.1.4"
+		"dotenv": "^16.1.4",
+		"sqlite": "^5.0.1",
+		"sqlite3": "^5.1.6"
 	}
 }

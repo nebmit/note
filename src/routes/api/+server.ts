@@ -1,41 +1,52 @@
 import { error, json } from '@sveltejs/kit';
 import { parse, serialize } from 'cookie';
+import sqlite3 from 'sqlite3';
+import { open, Database } from 'sqlite';
 
-const users: Array<{ name: string, salt: string, content: string, secret: string }> = [
-    {
-        name: 'admin',
-        content: 'ELGvhy2RGQDPThII',
-        salt: '22921938238255138165311209243233179175794',
-        secret: 'aRUtyVZDSHH5gKWr6SbHQeInZ4jmYKBiha4sP8SPIBD9+3o9QCOJ2ZdL/ZwOZYh+1bTdHv6UFrLu406LvX5GmQ=='
-    }
-]
+let db: Database<sqlite3.Database, sqlite3.Statement>;
+async function database(): Promise<Database<sqlite3.Database, sqlite3.Statement>> {
+    if (db != undefined) return db;
+    db = await open({
+        filename: './database_sqlite3.db',
+        driver: sqlite3.Database,
+    });
 
-export function GET({ url, cookies }) {
+    await db.exec(`CREATE TABLE IF NOT EXISTS users (name TEXT, salt TEXT, content TEXT, secret TEXT)`);
+    return db;
+}
+
+export async function GET({ url, cookies }) {
+    const db = await database();
     let userEntry;
 
-    if (url.searchParams.get('user')) {
-        const user = url.searchParams.get('user');
-        console.log('GET user by name', user)
-        userEntry = users.find((u) => u.name === user);
-    } else if (cookies.get('user')) {
+    if (cookies.get('user')) {
         const userSecret = cookies.get('user');
-        console.log('GET user by secret', userSecret)
-        userEntry = users.find((u) => u.secret === userSecret);
+        userEntry = await db.get('SELECT * FROM users WHERE secret = ?', userSecret);
     }
+
+    if (url.searchParams.get('user')) {
+        const userName = url.searchParams.get('user');
+        userEntry = await db.get('SELECT * FROM users WHERE name = ?', userName);
+        if (!userEntry) {
+            const salt = crypto.getRandomValues(new Uint8Array(16)).join('');
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const ivBase64 = btoa(String.fromCharCode(...iv));
+            const secret = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(64))));
+            const user = {
+                name: userName,
+                salt: salt,
+                content: ivBase64 + '',
+                secret: secret
+            };
+
+            await db.run('INSERT INTO users (name, salt, content, secret) VALUES (?, ?, ?, ?)', [user.name, user.salt, user.content, user.secret]);
+            userEntry = user;
+            console.log('Created new user', user, 'with salt', user.salt, 'and IV', user.content, 'and secret', user.secret, '\n');
+        }
+    }
+
     if (!userEntry) {
-        const salt = crypto.getRandomValues(new Uint8Array(16)).join('');
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        const ivBase64 = btoa(String.fromCharCode(...iv));
-        const secret = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(64))));
-        const user = {
-            name: 'user' + users.length,
-            salt: salt,
-            content: ivBase64 + '',
-            secret: secret
-        };
-        users.push(user);
-        userEntry = user;
-        console.log('Created new user', user, 'with salt', user.salt, 'and IV', user.content, 'and secret', user.secret, '\n');
+        throw error(400, 'Invalid user');
     }
 
     let response = json({ name: userEntry.name, salt: userEntry.salt, content: userEntry.content });
@@ -50,6 +61,7 @@ export function GET({ url, cookies }) {
 }
 
 export async function POST({ request }) {
+    const db = await database();
     const cookieString = request.headers.get('cookie');
     const { content } = await request.json();
 
@@ -59,17 +71,13 @@ export async function POST({ request }) {
 
     const cookie = parse(cookieString);
 
-    if (!cookie.user || !content) {
-        throw error(400, 'Missing user or content parameter');
-    }
+    let userEntry = await db.get('SELECT * FROM users WHERE secret = ?', cookie.user);
 
-    let userEntry = users.find((u) => u.secret === cookie.user);
-
-    if (userEntry === undefined) {
+    if (!userEntry) {
         throw error(400, 'Invalid user');
     }
 
-    userEntry.content = content;
+    await db.run('UPDATE users SET content = ? WHERE secret = ?', [content, cookie.user]);
 
     let response = json({ success: true });
 

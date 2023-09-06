@@ -16,6 +16,7 @@
     let username = "";
     let password = "";
 
+    let registerPrompt = false;
     let username_error = false;
     let password_error = false;
 
@@ -29,6 +30,8 @@
         const obj = await response.json();
         if (response.status === 200) {
             username = obj.name;
+        } else if (response.status === 400) {
+            registerPrompt = true;
         }
     });
 
@@ -36,6 +39,7 @@
         let abort = false;
         username_error = false;
         password_error = false;
+        registerPrompt = false;
 
         if (abort) return;
         login(username, password);
@@ -82,6 +86,15 @@
                             }}
                         >
                             <span class="text-red-500">{error?.message}</span>
+                        </div>
+                    {/if}
+                    {#if registerPrompt}
+                        <div class="flex justify-center">
+                            <span class="text-gray-500"
+                                >Feel free to log in using any credentials. If
+                                they haven't been claimed by someone else,
+                                you're good to go. This is just a demo! :)</span
+                            >
                         </div>
                     {/if}
                     <input
