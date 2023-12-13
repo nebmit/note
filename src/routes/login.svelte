@@ -1,48 +1,39 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    import { getContext, onMount } from "svelte";
     import { quintInOut } from "svelte/easing";
     import { fade, fly } from "svelte/transition";
 
     import Logo from "./logo.svelte";
+    import type { Writable } from "svelte/store";
+    import type { User } from "../app";
 
-    export let login: (username: string, password: string) => void;
-    export let error: { message: string } | null;
+    export let login: (password: string) => void;
 
     let loginVisible = false;
 
     let in_text_delay = 1000;
     let out_text_delay = 0;
 
-    let username = "";
     let password = "";
 
-    let registerPrompt = false;
-    let username_error = false;
-    let password_error = false;
-
-    let accentColor = error ? "#DC2626" : "#EB1C76";
-
-    onMount(async () => {
-        loginVisible = true;
-        const response = await fetch("/api", {
-            method: "GET",
-        });
-        const obj = await response.json();
-        if (response.status === 200) {
-            username = obj.name;
-        } else if (response.status === 400) {
-            registerPrompt = true;
-        }
+    const userStore = getContext<Writable<User>>("user");
+    let user: User;
+    userStore.subscribe((value: User) => {
+        user = value;
     });
 
-    function attemptLogin(username: string, password: string): void {
+    let ssoURL = import.meta.env.VITE_SSO_URL;
+    let loginURL = `${ssoURL}/login`;
+    onMount(() => {
+        loginURL = `${ssoURL}/login?redirect_uri=${window.location}`;
+        loginVisible = true;
+    });
+
+    function attemptLogin(password: string): void {
         let abort = false;
-        username_error = false;
-        password_error = false;
-        registerPrompt = false;
 
         if (abort) return;
-        login(username, password);
+        login(password);
     }
 </script>
 
@@ -70,71 +61,34 @@
             </div>
 
             <div class="flex justify-center">
-                <Logo width="30%" {accentColor} />
+                <Logo width="30%" accentColor="#EB1C76" />
             </div>
 
             <div class="flex flex-col mt-20 justify-center items-center">
-                <div class="flex flex-col mb-4 justify-center items-center">
-                    {#if error}
-                        <div
-                            class="flex justify-center"
-                            in:fade={{
-                                delay: in_text_delay + 1000,
-                            }}
-                            out:fade={{
-                                delay: out_text_delay,
-                            }}
-                        >
-                            <span class="text-red-500">{error?.message}</span>
-                        </div>
-                    {/if}
-                    {#if registerPrompt}
-                        <div
-                            class="flex justify-center"
-                            in:fade={{ delay: in_text_delay + 1000 }}
-                            out:fade={{ delay: out_text_delay }}
-                        >
-                            <span class="text-gray-500 text-center w-1/2"
-                                >Feel free to log in using any credentials. If
-                                they haven't been claimed by someone else,
-                                you're good to go. This is just a demo! :)</span
-                            >
-                        </div>
-                    {/if}
-                    <input
-                        class="border-b border-b-gray-300 bg-slate-400/10 p-2 m-2 outline-none text-white w-80 {username_error
-                            ? 'border-b-red-500'
-                            : ''}"
-                        type="text"
-                        placeholder="Username"
-                        bind:value={username}
-                        on:keydown={(event) => {
-                            if (event.key === "Enter")
-                                attemptLogin(username, password);
+                {#if user.isAuthenticated}
+                    <div
+                        class="flex justify-center"
+                        in:fade={{
+                            delay: in_text_delay + 1000,
                         }}
-                        in:fly={{
-                            x: -20,
-                            delay: in_text_delay,
-                            duration: 2000,
-                            easing: quintInOut,
-                        }}
-                        out:fly={{
-                            x: 20,
+                        out:fade={{
                             delay: out_text_delay,
-                            duration: 2000,
-                            easing: quintInOut,
                         }}
-                    />
+                    >
+                        <span class="text-white">
+                            Logged in as <span class="font-bold"
+                                >{user.uuid}</span
+                            >
+                        </span>
+                    </div>
+
                     <input
-                        class="border-b border-b-gray-300 bg-slate-400/10 p-2 m-2 outline-none text-white w-80 {password_error
-                            ? 'border-b-red-500'
-                            : ''}"
+                        class="border-b border-b-gray-300 bg-slate-400/10 p-2 m-2 outline-none text-white w-80 mb-4"
                         type="password"
                         placeholder="Password"
                         bind:value={password}
                         on:keydown={(event) => {
-                            if (event.key === "Enter")
-                                attemptLogin(username, password);
+                            if (event.key === "Enter") attemptLogin(password);
                         }}
                         in:fly={{
                             x: -20,
@@ -149,28 +103,46 @@
                             easing: quintInOut,
                         }}
                     />
-                </div>
-                <button
-                    class="bg-slate-400/10 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded w-40"
-                    type="button"
-                    on:click={() => {
-                        attemptLogin(username, password);
-                    }}
-                    in:fly={{
-                        x: -20,
-                        delay: in_text_delay + 300,
-                        duration: 2000,
-                        easing: quintInOut,
-                    }}
-                    out:fly={{
-                        x: 20,
-                        delay: out_text_delay + 300,
-                        duration: 2000,
-                        easing: quintInOut,
-                    }}
-                >
-                    Sign In
-                </button>
+                    <button
+                        class={`bg-slate-400/10 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded w-40`}
+                        type="button"
+                        on:click={() => {
+                            attemptLogin(password);
+                        }}
+                        in:fly={{
+                            x: -20,
+                            delay: in_text_delay + 300,
+                            duration: 2000,
+                            easing: quintInOut,
+                        }}
+                        out:fly={{
+                            x: 20,
+                            delay: out_text_delay + 300,
+                            duration: 2000,
+                            easing: quintInOut,
+                        }}
+                    >
+                        Unlock Note
+                    </button>
+                {:else}
+                    <div
+                        class="flex justify-center"
+                        in:fade={{
+                            delay: in_text_delay + 1000,
+                        }}
+                        out:fade={{
+                            delay: out_text_delay,
+                        }}
+                    >
+                        <span class="text-white text-xl"
+                            >Login via <a
+                                href={loginURL}
+                                class="text-white underline font-bold text-2xl"
+                                >SSO</a
+                            ></span
+                        >
+                    </div>
+                {/if}
             </div>
         {/if}
     </div>

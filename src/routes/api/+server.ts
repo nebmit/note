@@ -15,17 +15,12 @@ async function database(): Promise<Database<sqlite3.Database, sqlite3.Statement>
     return db;
 }
 
-export async function GET({ url, cookies }) {
+export async function GET({ locals }) {
     const db = await database();
     let userEntry;
 
-    if (cookies.get('user')) {
-        const userSecret = cookies.get('user');
-        userEntry = await db.get('SELECT * FROM users WHERE secret = ?', userSecret);
-    }
-
-    if (url.searchParams.get('user')) {
-        const userName = url.searchParams.get('user');
+    if (locals.user?.isAuthenticated) {
+        const userName = locals.user.uuid;
         userEntry = await db.get('SELECT * FROM users WHERE name = ?', userName);
         if (!userEntry) {
             const salt = crypto.getRandomValues(new Uint8Array(16)).join('');

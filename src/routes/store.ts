@@ -16,7 +16,6 @@ export const logStore = {
 };
 
 export const userStore: Writable<{
-    name: string;
     password: string;
     salt: string;
     content: string;

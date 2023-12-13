@@ -8,31 +8,25 @@
     let loading = false;
     let isLoggedIn = false;
 
-    let error: { message: string } | null = null;
-
-    async function login(username: string, password: string) {
+    async function login(password: string) {
         loading = true;
         logStore.clear();
-        logStore.add(`fetching content and salt for user '${username}'`);
+        logStore.add(`fetching content and salt`);
         const response = await waitMin(
-            fetch("/api?user=" + username, {
+            fetch("/api", {
                 method: "GET",
             }),
-            2000
+            2000,
         );
         if (response.status !== 200) {
-            error = { message: "User not found" };
             setTimeout(() => {
                 loading = false;
             }, 500);
             return;
         }
         const obj = await response.json();
-        logStore.add(
-            `completed fetching content and salt for user '${username}'`
-        );
+        logStore.add(`completed fetching content and salt`);
         userStore.set({
-            name: username,
             password: password,
             salt: obj.salt,
             content: obj.content,
@@ -61,5 +55,5 @@
         }}
     />
 {:else if !isLoggedIn && !loading}
-    <Login {login} {error} />
+    <Login {login} />
 {/if}
