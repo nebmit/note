@@ -1,7 +1,7 @@
 
 export const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export const waitMin = async (fn: Promise<any>, ms: number) => {
+export const waitMin = async <T>(fn: Promise<T>, ms: number) => {
     const start = Date.now();
     const result = await fn;
     const end = Date.now();
@@ -10,7 +10,7 @@ export const waitMin = async (fn: Promise<any>, ms: number) => {
         await wait(ms - duration);
     }
     return result;
-}
+};
 
 export const arrayBufferToString = (buffer: ArrayBuffer) => {
     return Array.prototype.map
@@ -18,7 +18,7 @@ export const arrayBufferToString = (buffer: ArrayBuffer) => {
             ("0" + byte.toString(16)).slice(-2)
         )
         .join("");
-}
+};
 
 export const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
     let binary = '';
@@ -28,7 +28,7 @@ export const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
         binary += String.fromCharCode(bytes[i]);
     }
     return btoa(binary);
-}
+};
 
 export const stringToArrayBuffer = (str: string) => {
     const buf = new ArrayBuffer(str.length);
@@ -37,4 +37,4 @@ export const stringToArrayBuffer = (str: string) => {
         bufView[i] = str.charCodeAt(i);
     }
     return buf;
-}
+};

@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable, type Writable } from 'svelte/store';
 
 const logsMessagesStore = writable(new Array<string>());
 
@@ -13,6 +13,11 @@ export const logStore = {
     clear: () => {
         logsMessagesStore.set([]);
     }
-}
+};
 
-export const userStore = writable(null as any);
+export const userStore: Writable<{
+    name: string;
+    password: string;
+    salt: string;
+    content: string;
+} | null> = writable(null);

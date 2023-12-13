@@ -1,0 +1,56 @@
+{
+    "extends": [
+        "eslint:recommended",
+        "plugin:@typescript-eslint/recommended",
+        "plugin:svelte/recommended"
+    ],
+    "parser": "@typescript-eslint/parser",
+    "parserOptions": {
+        "project": "./tsconfig.json",
+        "extraFileExtensions": [
+            ".svelte"
+        ]
+    },
+    "plugins": [
+        "@typescript-eslint",
+        "svelte"
+    ],
+    "overrides": [
+        {
+            "files": [
+                "*.svelte"
+            ],
+            "parser": "svelte-eslint-parser",
+            "parserOptions": {
+                "parser": "@typescript-eslint/parser"
+            }
+        }
+    ],
+    "rules": {
+        "@typescript-eslint/semi": [
+            "error",
+            "always"
+        ],
+        "semi": [
+            "error",
+            "always"
+        ],
+        "indent": [
+            "error",
+            4
+        ],
+        "space-before-function-paren": [
+            "error",
+            {
+                "anonymous": "never",
+                "named": "never",
+                "asyncArrow": "always"
+            }
+        ]
+    },
+    "env": {
+        "browser": true,
+        "es6": true,
+        "node": true
+    }
+}

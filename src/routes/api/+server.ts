@@ -49,7 +49,7 @@ export async function GET({ url, cookies }) {
         throw error(400, 'Invalid user');
     }
 
-    let response = json({ name: userEntry.name, salt: userEntry.salt, content: userEntry.content });
+    const response = json({ name: userEntry.name, salt: userEntry.salt, content: userEntry.content });
     response.headers.append('Set-Cookie', serialize('user', userEntry.secret, {
         path: '/',
         secure: true,
@@ -71,7 +71,7 @@ export async function POST({ request }) {
 
     const cookie = parse(cookieString);
 
-    let userEntry = await db.get('SELECT * FROM users WHERE secret = ?', cookie.user);
+    const userEntry = await db.get('SELECT * FROM users WHERE secret = ?', cookie.user);
 
     if (!userEntry) {
         throw error(400, 'Invalid user');
@@ -79,7 +79,7 @@ export async function POST({ request }) {
 
     await db.run('UPDATE users SET content = ? WHERE secret = ?', [content, cookie.user]);
 
-    let response = json({ success: true });
+    const response = json({ success: true });
 
     return response;
 }

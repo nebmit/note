@@ -47,7 +47,7 @@
         const saltString = userObj.salt;
 
         logStore.add(
-            `attempting to derive key from password '${redacted(password)}'`
+            `attempting to derive key from password '${redacted(password)}'`,
         );
 
         const encoder = new TextEncoder();
@@ -55,10 +55,10 @@
 
         const passwordHash = await waitMin(
             crypto.subtle.digest("SHA-256", encoder.encode(password)),
-            500
+            500,
         );
         logStore.add(
-            `hashed password: ${redacted(arrayBufferToString(passwordHash))}`
+            `hashed password: ${redacted(arrayBufferToString(passwordHash))}`,
         );
 
         const key: CryptoKey = await waitMin(
@@ -67,9 +67,9 @@
                 passwordHash,
                 { name: "PBKDF2" },
                 false,
-                ["deriveBits"]
+                ["deriveBits"],
             ),
-            500
+            500,
         );
         logStore.add(`imported hashed password as key`);
 
@@ -82,14 +82,14 @@
                     hash: { name: "SHA-256" },
                 },
                 key,
-                32 * 8
+                32 * 8,
             ),
-            500
+            500,
         );
         logStore.add(
             `derived encryption key using PBKDF2: ${redacted(
-                arrayBufferToString(derivedKey)
-            )}`
+                arrayBufferToString(derivedKey),
+            )}`,
         );
 
         encryptionKey = await crypto.subtle.importKey(
@@ -97,7 +97,7 @@
             derivedKey,
             { name: "AES-GCM" },
             false,
-            ["encrypt", "decrypt"]
+            ["encrypt", "decrypt"],
         );
         logStore.add(`imported derived key as encryption key`);
 
@@ -107,8 +107,8 @@
         content = b64CipherText;
         logStore.add(
             `extracted iv '${redacted(
-                iv
-            )}' and ciphertext from encrypted content`
+                iv,
+            )}' and ciphertext from encrypted content`,
         );
 
         const ciphertext = atob(b64CipherText);
@@ -133,7 +133,7 @@
                     iv: ivUint8Array,
                 },
                 encryptionKey,
-                ciphertextUint8Array
+                ciphertextUint8Array,
             );
 
             const decryptedString = new TextDecoder().decode(decryptedContent);
@@ -172,7 +172,7 @@
                 iv: ivUint8Array,
             },
             encryptionKey,
-            new TextEncoder().encode(content)
+            new TextEncoder().encode(content),
         );
         logStore.add(`sucessfully encrypted content locally`);
         const encryptedString = arrayBufferToBase64(encrypted);
@@ -197,7 +197,7 @@
     }
 
     function attemptSave() {
-        let timer: any;
+        let timer: number | undefined;
         return () => {
             if (timer) clearTimeout(timer);
             savestate = "waiting...";
@@ -217,6 +217,7 @@
             : message;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     function scrollToNewMessages(node: HTMLDivElement, args: string[]) {
         const scroll = () =>
             node.scroll({
@@ -356,12 +357,12 @@
                             <p class="text-lg console-message">
                                 {redactSensitiveContent
                                     ? message.replaceAll(
-                                          /\*\*\*REDACTBEGIN.*REDACTEND\*\*\*/gm,
-                                          "[REDACTED]"
-                                      )
+                                        /\*\*\*REDACTBEGIN.*REDACTEND\*\*\*/gm,
+                                        "[REDACTED]",
+                                    )
                                     : message
-                                          .replaceAll(/\*\*\*REDACTBEGIN/gm, "")
-                                          .replaceAll(/REDACTEND\*\*\*/gm, "")}
+                                        .replaceAll(/\*\*\*REDACTBEGIN/gm, "")
+                                        .replaceAll(/REDACTEND\*\*\*/gm, "")}
                             </p>
                         {/each}
                     </div>
@@ -396,7 +397,9 @@
     }
     .console-message {
         color: theme(colors.slate.100);
-        font: 1rem "Fira Code", monospace;
+        font:
+            1rem "Fira Code",
+            monospace;
         padding: 0.5rem 0 0 0;
         word-wrap: break-all;
         overflow-wrap: break-all;
