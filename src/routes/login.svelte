@@ -22,10 +22,9 @@
         user = value;
     });
 
-    let ssoURL = import.meta.env.VITE_SSO_URL;
-    let loginURL = `${ssoURL}/login`;
+    let LOGIN_URL = import.meta.env.VITE_LOGIN_URL;
     onMount(() => {
-        loginURL = `${ssoURL}/login?redirect_uri=${window.location}`;
+        LOGIN_URL = `${LOGIN_URL}?redirect_uri=${window.location}`;
         loginVisible = true;
     });
 
@@ -136,7 +135,7 @@
                     >
                         <span class="text-white text-xl"
                             >Login via <a
-                                href={loginURL}
+                                href={LOGIN_URL}
                                 class="text-white underline font-bold text-2xl"
                                 >SSO</a
                             ></span

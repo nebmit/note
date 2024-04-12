@@ -49,7 +49,8 @@ Ensure you have the latest LTS version of Node.js installed on your machine to r
 
    - `PORT=Your_Port` (Optional, defaults to `3000`, e.g., `PORT=3000`)
    - `ORIGIN=Your_Origin` (Required, e.g., `ORIGIN=http://localhost:3000`)
-   - `VITE_SSO_URL=Your_SSO_URL` (Required for single sign-on, e.g., `VITE_SSO_URL=http://localhost:8080`)
+   - `VITE_AUTH_URL=Your_Auth_URL` (Required for authentication, e.g., `VITE_AUTH_URL=http://localhost:8080/auth`)
+   - `VITE_LOGIN_URL=Your_Login_URL` (Required for redirecting the user to login, e.g., `VITE_LOGIN_URL=http://localhost:8080/login`)
 
 ### Running the Application
 

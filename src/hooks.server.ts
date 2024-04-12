@@ -1,11 +1,12 @@
 import { redirect } from '@sveltejs/kit';
 
-const ssoURL = import.meta.env.VITE_SSO_URL;
+const AUTH_URL = import.meta.env.VITE_AUTH_URL;
+const LOGIN_URL = import.meta.env.VITE_LOGIN_URL;
 
 export async function handle({ event, resolve }) {
     const sessionId = event.cookies.get('session_id');
     if (!sessionId && isProtectedRoute(event.url.pathname)) {
-        throw redirect(303, `${ssoURL}/login?redirect_uri=${event.url.href}`);
+        throw redirect(303, `${LOGIN_URL}?redirect_uri=${event.url.href}`);
     }
 
     const user = await validateToken(sessionId);
@@ -38,7 +39,7 @@ async function validateToken(token: string | undefined) {
         return false;
     }
 
-    const response = await fetch(`${ssoURL}/api/authenticate`, {
+    const response = await fetch(AUTH_URL, {
         headers: {
             'Authorization': `Bearer ${token}`
         }
