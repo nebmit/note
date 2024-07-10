@@ -37,7 +37,7 @@
 </script>
 
 <div class="container mx-auto">
-    <div class="flex flex-col h-screen justify-center">
+    <div class="flex flex-col h-[calc(100dvh)] justify-center">
         {#if loginVisible}
             <div class="flex justify-center heading unselectable">
                 {#each "NOTE" as char, i}
