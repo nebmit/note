@@ -148,10 +148,12 @@
 </div>
 
 <style lang="postcss">
+    @reference "tailwindcss";
+
     .heading {
         font-size: 54px;
         font-family: "Josefin Sans";
-        color: theme(colors.gray.100);
+        color: theme(--color-gray-100);
         letter-spacing: 0.2em;
         font-weight: 200;
     }

@@ -150,6 +150,7 @@
                 "Failed to decrypt content. Are you sure you entered the correct password?";
             logStore.add(`ERROR: failed to decrypt content`);
             logStore.add(`Are you sure you entered the correct password?`);
+            console.error(e);
             return;
         }
 
@@ -323,7 +324,7 @@
                         {disabled}
                         bind:value={content}
                         on:keypress={attemptSave()}
-                    />
+                    ></textarea>
                 </div>
             </div>
             <div
@@ -373,6 +374,8 @@
 {/if}
 
 <style lang="postcss">
+    @reference "tailwindcss";
+
     h1 {
         font-size: 1.5rem;
         font-family: "Josefin Sans";
@@ -393,10 +396,10 @@
         font-family: "Josefin Sans";
         letter-spacing: 0.1em;
         font-weight: 300;
-        color: theme(colors.slate.100);
+        color: theme(--color-slate-100);
     }
     .console-message {
-        color: theme(colors.slate.100);
+        color: theme(--color-slate-100);
         font:
             1rem "Fira Code",
             monospace;
