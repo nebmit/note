@@ -2,63 +2,81 @@
 
 ## Overview
 
-This SvelteKit Note-Taking App is a client-side encrypted application for securely managing notes. Built with SvelteKit and styled with Tailwind CSS, it prioritizes user privacy by ensuring all notes are encrypted and decrypted on the client side. The back-end relies on an SQLite3 database to store note information, linking them to individual user accounts.
+A client-side encrypted scratchpad. One note per user, encrypted and decrypted
+entirely in the browser. The server stores an opaque envelope and never sees
+plaintext or the password. Identity comes from an SSO host, so the
+app has no user table and no login form of its own; rows are keyed on the SSO
+account uuid. A console pane narrates each crypto step as it happens.
 
 ## Features
 
-- **Client-Side Encryption/Decryption**: Ensures your notes are secure and private.
-- **User Identification**: Notes are linked to users based on the account information provided at sign-in.
-- **Seamless Note Management**: No need to create an account. Notes are generated and accessible immediately, on-the-fly.
-- **Security**: Only the correct password or an empty note allows for editing. Incorrect passwords prevent access to note content, safeguarding against unauthorized modifications.
+- **Client-side encryption/decryption**: AES-GCM with a key derived from your
+  password via PBKDF2-SHA256 (600,000 iterations). The key never leaves the tab.
+- **Single sign-on**: authentication is delegated to `timben.net`; the app only
+  resolves the shared session cookie.
+- **No account setup**: your note is created on first unlock.
+- **Tamper-evident**: a wrong password, or modified ciphertext, fails the
+  AES-GCM authentication tag rather than returning garbage.
 
 ## Getting Started
 
 ### Prerequisites
 
-Ensure you have the latest LTS version of Node.js installed on your machine to run the application smoothly.
+**Node.js 24 or newer.** The app uses the built-in `node:sqlite` module, so
+there is no native database dependency to compile.
 
 ### Installation
 
 1. **Clone the repository**
 
-   Use Git to clone the project's repository into your local machine:
-
    ```bash
    git clone https://github.com/nebmit/note.git
-   ```
-
-2. **Navigate to the project directory**
-
-   Change into the project's directory:
-
-   ```bash
    cd note
    ```
 
-3. **Install Dependencies**
-
-   Run the following command to install the necessary dependencies:
+2. **Install dependencies**
 
    ```bash
    npm install
    ```
 
-4. **Environment Configuration**
+3. **Environment configuration**
 
-   Create a `.env` file in the root directory and configure the following variables:
+   Copy `.env.example` to `.env` and adjust:
 
-   - `PORT=Your_Port` (Optional, defaults to `3000`, e.g., `PORT=3000`)
-   - `ORIGIN=Your_Origin` (Required, e.g., `ORIGIN=http://localhost:3000`)
-   - `VITE_AUTH_URL=Your_Auth_URL` (Required for authentication, e.g., `VITE_AUTH_URL=http://localhost:8080/auth`)
-   - `VITE_LOGIN_URL=Your_Login_URL` (Required for redirecting the user to login, e.g., `VITE_LOGIN_URL=http://localhost:8080/login`)
+   - `ORIGIN` (required) — the origin this app is served from, e.g.
+     `https://note.timben.net`. Used by adapter-node and to build the absolute
+     `redirect_uri` handed to the SSO host. It is deliberately *not* derived
+     from the request `Host` header, so it stays correct behind a proxy.
+   - `AUTH_ORIGIN` (required) — the SSO host origin: `https://timben.net`, or
+     `http://localhost:5172` in development. Paths are appended by the app.
+   - `PORT` (optional, defaults to `3000`).
+   - `DATABASE_PATH` (optional, defaults to `./database_sqlite3.db`).
+
+   These are read at **runtime**, not baked in at build time, so one build can
+   be re-pointed between environments without rebuilding.
 
 ### Running the Application
-
-After setting up, you can build and start the application using:
 
 ```bash
 npm run build
 npm start
 ```
 
-Your app will be accessible on the configured port or by default at `http://localhost:3000/`.
+Quality gates: `npm run check` (svelte-check) and `npm run lint` (ESLint).
+
+## Storage format
+
+Notes are stored as a self-describing JSON envelope:
+
+```json
+{ "v": 1, "kdf": "PBKDF2-SHA256", "iter": 600000,
+  "salt": "<base64>", "iv": "<base64>", "ct": "<base64>" }
+```
+
+A **fresh 12-byte IV is generated on every save** — reusing an AES-GCM nonce
+under a fixed key leaks plaintext and weakens the authentication tag.
+
+Because the KDF and its parameters travel inside each record, raising the
+iteration count or switching KDF later is a `v` bump that existing readers still
+handle, rather than another breaking re-encryption.
