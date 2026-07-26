@@ -1,10 +1,6 @@
 import { env } from '$env/dynamic/private';
+import type { SsoUser } from '$lib/types';
 import { createHash } from 'node:crypto';
-
-export interface SsoUser {
-    uuid: string;
-    elevated: boolean;
-}
 
 const SSO_TIMEOUT_MS = 3_000;
 const CACHE_TTL_MS = 60_000;

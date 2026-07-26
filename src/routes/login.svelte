@@ -4,7 +4,7 @@
     import { fade, fly } from "svelte/transition";
 
     import Logo from "./logo.svelte";
-    import type { SsoUser } from "$lib/server/auth";
+    import type { SsoUser } from "$lib/types";
 
     let {
         login,

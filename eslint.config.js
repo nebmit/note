@@ -22,6 +22,10 @@ export default ts.config(
                 anonymous: 'never',
                 named: 'never',
                 asyncArrow: 'always'
+            }],
+            '@typescript-eslint/no-unused-vars': ['error', {
+                argsIgnorePattern: '^_',
+                varsIgnorePattern: '^_'
             }]
         }
     },
@@ -38,7 +42,10 @@ export default ts.config(
         rules: {
             // Svelte's formatting of markup expressions does not line up with the
             // 4-space rule, and svelte-eslint-parser reports spurious violations.
-            indent: 'off'
+            indent: 'off',
+            // Every link in this app points at the SSO host on another origin,
+            // where resolve() does not apply.
+            'svelte/no-navigation-without-resolve': ['error', { ignoreLinks: true }]
         }
     }
 );

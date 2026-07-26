@@ -1,6 +1,6 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts
 // for information about these interfaces
-import type { SsoUser } from '$lib/server/auth';
+import type { SsoUser } from '$lib/types';
 
 declare global {
 	namespace App {
