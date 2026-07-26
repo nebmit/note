@@ -2,21 +2,27 @@
     import { cubicOut, cubicIn } from "svelte/easing";
     import { draw, fade } from "svelte/transition";
 
-    export let width = "400";
-    export let stroke = "#ffffff";
-    export let accentColor = "#EB1C76";
+    let {
+        width = "400",
+        stroke = "#ffffff",
+        accentColor = "#EB1C76",
+    }: {
+        width?: string;
+        stroke?: string;
+        accentColor?: string;
+    } = $props();
 
-    let points_stage_0 = { delay: 100, duration: 1400 };
-    let reverse_points_stage_2 = { delay: 2000 };
+    const points_stage_0 = { delay: 100, duration: 1400 };
+    const reverse_points_stage_2 = { delay: 2000 };
 
-    let points_stage_1 = { delay: 1600 };
-    let reverse_points_stage_1 = { delay: 1000 };
+    const points_stage_1 = { delay: 1600 };
+    const reverse_points_stage_1 = { delay: 1000 };
 
-    let lines_stage_1 = { delay: 1500, easing: cubicOut };
-    let reverse_lines_stage_1 = { delay: 1000, easing: cubicIn };
+    const lines_stage_1 = { delay: 1500, easing: cubicOut };
+    const reverse_lines_stage_1 = { delay: 1000, easing: cubicIn };
 
-    let lines_stage_2 = { delay: 2000, duration: 2000, easing: cubicOut };
-    let reverse_lines_stage_0 = { delay: 100, duration: 1000, easing: cubicIn };
+    const lines_stage_2 = { delay: 2000, duration: 2000, easing: cubicOut };
+    const reverse_lines_stage_0 = { delay: 100, duration: 1000, easing: cubicIn };
 </script>
 
 <svg {stroke} {width} viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">

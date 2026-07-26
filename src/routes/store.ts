@@ -5,18 +5,15 @@ const logsMessagesStore = writable(new Array<string>());
 export const logStore = {
     subscribe: logsMessagesStore.subscribe,
     add: (message: string) => {
-        logsMessagesStore.update((messages) => {
-            messages.push(message);
-            return messages;
-        });
+        logsMessagesStore.update((messages) => [...messages, message]);
     },
     clear: () => {
         logsMessagesStore.set([]);
     }
 };
 
-export const userStore: Writable<{
+export const noteStore: Writable<{
     password: string;
-    salt: string;
-    content: string;
+    /** The stored envelope, or '' for a note that has never been saved. */
+    stored: string;
 } | null> = writable(null);

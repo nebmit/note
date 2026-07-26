@@ -1,46 +1,39 @@
 <script lang="ts">
-    import { getContext, onMount } from "svelte";
+    import { onMount } from "svelte";
     import { quintInOut } from "svelte/easing";
     import { fade, fly } from "svelte/transition";
 
     import Logo from "./logo.svelte";
-    import type { Writable } from "svelte/store";
-    import type { User } from "../app";
+    import type { SsoUser } from "$lib/server/auth";
 
-    export let login: (password: string) => void;
+    let {
+        login,
+        user,
+        signInUrl,
+        error = "",
+    }: {
+        login: (password: string) => void;
+        user: SsoUser | null;
+        signInUrl: string | null;
+        error?: string;
+    } = $props();
 
-    let loginVisible = false;
+    let loginVisible = $state(false);
+    let password = $state("");
 
-    let in_text_delay = 1000;
-    let out_text_delay = 0;
+    const in_text_delay = 1000;
+    const out_text_delay = 0;
 
-    let password = "";
-
-    const userStore = getContext<Writable<User>>("user");
-    let user: User;
-    userStore.subscribe((value: User) => {
-        user = value;
-    });
-
-    let LOGIN_URL = import.meta.env.VITE_LOGIN_URL;
     onMount(() => {
-        LOGIN_URL = `${LOGIN_URL}?redirect_uri=${window.location}`;
         loginVisible = true;
     });
-
-    function attemptLogin(password: string): void {
-        let abort = false;
-
-        if (abort) return;
-        login(password);
-    }
 </script>
 
 <div class="container mx-auto">
     <div class="flex flex-col h-[calc(100dvh)] justify-center">
         {#if loginVisible}
             <div class="flex justify-center heading unselectable">
-                {#each "NOTE" as char, i}
+                {#each "NOTE" as char, i (i)}
                     <span
                         in:fly={{
                             y: 20,
@@ -64,20 +57,14 @@
             </div>
 
             <div class="flex flex-col mt-20 justify-center items-center">
-                {#if user.isAuthenticated}
+                {#if user}
                     <div
                         class="flex justify-center"
-                        in:fade={{
-                            delay: in_text_delay + 1000,
-                        }}
-                        out:fade={{
-                            delay: out_text_delay,
-                        }}
+                        in:fade={{ delay: in_text_delay + 1000 }}
+                        out:fade={{ delay: out_text_delay }}
                     >
                         <span class="text-white">
-                            Logged in as <span class="font-bold"
-                                >{user.uuid}</span
-                            >
+                            Logged in as <span class="font-bold">{user.uuid}</span>
                         </span>
                     </div>
 
@@ -86,8 +73,8 @@
                         type="password"
                         placeholder="Password"
                         bind:value={password}
-                        on:keydown={(event) => {
-                            if (event.key === "Enter") attemptLogin(password);
+                        onkeydown={(event) => {
+                            if (event.key === "Enter") login(password);
                         }}
                         in:fly={{
                             x: -20,
@@ -103,11 +90,9 @@
                         }}
                     />
                     <button
-                        class={`bg-slate-400/10 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded w-40`}
+                        class="bg-slate-400/10 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded w-40"
                         type="button"
-                        on:click={() => {
-                            attemptLogin(password);
-                        }}
+                        onclick={() => login(password)}
                         in:fly={{
                             x: -20,
                             delay: in_text_delay + 300,
@@ -123,23 +108,27 @@
                     >
                         Unlock Note
                     </button>
+                    {#if error}
+                        <p class="text-red-500 mt-2" transition:fade>{error}</p>
+                    {/if}
                 {:else}
                     <div
                         class="flex justify-center"
-                        in:fade={{
-                            delay: in_text_delay + 1000,
-                        }}
-                        out:fade={{
-                            delay: out_text_delay,
-                        }}
+                        in:fade={{ delay: in_text_delay + 1000 }}
+                        out:fade={{ delay: out_text_delay }}
                     >
-                        <span class="text-white text-xl"
-                            >Login via <a
-                                href={LOGIN_URL}
-                                class="text-white underline font-bold text-2xl"
-                                >SSO</a
-                            ></span
-                        >
+                        {#if signInUrl}
+                            <span class="text-white text-xl"
+                                >Login via <a
+                                    href={signInUrl}
+                                    class="text-white underline font-bold text-2xl">SSO</a
+                                ></span
+                            >
+                        {:else}
+                            <span class="text-white text-xl">
+                                Sign-in is unavailable — AUTH_ORIGIN is not configured.
+                            </span>
+                        {/if}
                     </div>
                 {/if}
             </div>
@@ -153,7 +142,7 @@
     .heading {
         font-size: 54px;
         font-family: "Josefin Sans";
-        color: theme(--color-gray-100);
+        color: var(--color-gray-100);
         letter-spacing: 0.2em;
         font-weight: 200;
     }
@@ -161,7 +150,6 @@
     .unselectable {
         -webkit-touch-callout: none;
         -webkit-user-select: none;
-        -khtml-user-select: none;
         -moz-user-select: none;
         -ms-user-select: none;
         user-select: none;

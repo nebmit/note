@@ -1,15 +1,8 @@
 <script lang="ts">
-    import { setContext } from "svelte";
-    import { writable } from "svelte/store";
     import "../app.css";
-    import type { LayoutData } from "./$types";
+    import type { Snippet } from "svelte";
 
-    export let data: LayoutData;
-
-    const user = writable({});
-    $: user.set(data.user || { isAuthenticated: false });
-
-    setContext("user", user);
+    let { children }: { children: Snippet } = $props();
 </script>
 
-<slot />
+{@render children()}
