@@ -12,8 +12,15 @@ const CACHE_TTL_MS = 60_000;
  */
 const cache = new Map<string, { user: SsoUser | null; expires: number }>();
 
+let warnedMissingOrigin = false;
+
 function authOrigin(): string | undefined {
-    return env.AUTH_ORIGIN?.replace(/\/+$/, '') || undefined;
+    const origin = env.AUTH_ORIGIN?.replace(/\/+$/, '') || undefined;
+    if (!origin && !warnedMissingOrigin) {
+        warnedMissingOrigin = true;
+        console.warn('AUTH_ORIGIN is not set — every request will resolve as signed out.');
+    }
+    return origin;
 }
 
 /** Absolute URL back into this app, built from the configured origin rather

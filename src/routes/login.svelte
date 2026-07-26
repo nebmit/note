@@ -126,7 +126,7 @@
                             >
                         {:else}
                             <span class="text-white text-xl">
-                                Sign-in is unavailable — AUTH_ORIGIN is not configured.
+                                Sign-in is currently unavailable.
                             </span>
                         {/if}
                     </div>
