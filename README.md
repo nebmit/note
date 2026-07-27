@@ -4,19 +4,26 @@
 
 A client-side encrypted scratchpad. One note per user, encrypted and decrypted
 entirely in the browser. The server stores an opaque envelope and never sees
-plaintext or the password. Identity comes from an SSO host, so the
-app has no user table and no login form of its own; rows are keyed on the SSO
-account uuid. A console pane narrates each crypto step as it happens.
+plaintext or encryption keys. Identity and the account's single passkey come
+from the SSO host, so the app has no user table or password form of its own.
+Rows are keyed on the SSO account UUID. A console pane narrates non-secret
+crypto steps and their real elapsed time.
 
 ## Features
 
-- **Client-side encryption/decryption**: AES-GCM with a key derived from your
-  password via PBKDF2-SHA256 (600,000 iterations). The key never leaves the tab.
+- **Passkey-only encryption**: a user-verified WebAuthn PRF output feeds
+  HKDF-SHA256, which derives the AES-256-GCM key that unwraps the random note
+  key. PRF output and unwrapped keys never leave the tab.
+- **Fresh verification**: every reload and Lock requires the passkey again.
+  No key is cached in IndexedDB or handed through a URL.
 - **Single sign-on**: authentication is delegated to `timben.net`; the app only
-  resolves the shared session cookie.
+  resolves the shared session cookie and public passkey metadata.
 - **No account setup**: your note is created on first unlock.
-- **Tamper-evident**: a wrong password, or modified ciphertext, fails the
-  AES-GCM authentication tag rather than returning garbage.
+- **Tamper-evident and context-bound**: modified, swapped, or stale-context
+  ciphertext fails AES-GCM authentication rather than returning garbage.
+
+There is deliberately no password, recovery key, or server escrow. Losing or
+replacing the account's passkey permanently loses access to the note.
 
 ## Getting Started
 
@@ -64,19 +71,22 @@ npm start
 ```
 
 Quality gates: `npm run check` (svelte-check) and `npm run lint` (ESLint).
+Run `npm test` for crypto, WebAuthn, database, validation, and API tests.
 
-## Storage format
+## Encryption and storage
 
-Notes are stored as a self-describing JSON envelope:
+On first use the browser reserves random 32-byte PRF and HKDF inputs, evaluates
+the authenticator PRF, derives a non-extractable key-encryption key, and wraps a
+random AES-256-GCM data-encryption key. The server stores only those public
+inputs, the credential ID, wrapped key, ciphertext, and a compare-and-swap
+revision.
+
+Wrapped keys and notes use versioned envelopes:
 
 ```json
-{ "v": 1, "kdf": "PBKDF2-SHA256", "iter": 600000,
-  "salt": "<base64>", "iv": "<base64>", "ct": "<base64>" }
+{ "v": 1, "alg": "A256GCM", "iv": "<base64url>", "ct": "<base64url>" }
 ```
 
-A **fresh 12-byte IV is generated on every save** — reusing an AES-GCM nonce
-under a fixed key leaks plaintext and weakens the authentication tag.
-
-Because the KDF and its parameters travel inside each record, raising the
-iteration count or switching KDF later is a `v` bump that existing readers still
-handle, rather than another breaking re-encryption.
+Every operation uses a fresh 12-byte IV and a 128-bit authentication tag.
+Additional authenticated data binds key wraps and note ciphertext to their
+protocol, account, credential, keyring, and revision contexts.
