@@ -1,53 +1,56 @@
 <script lang="ts">
-    import { onMount } from "svelte";
-    import { quintInOut } from "svelte/easing";
-    import { fade, fly } from "svelte/transition";
-
-    import Logo from "./logo.svelte";
-    import type { SsoUser } from "$lib/types";
+    import { onMount } from 'svelte';
+    import { quintInOut } from 'svelte/easing';
+    import { fade, fly } from 'svelte/transition';
+    import type { SsoUser } from '$lib/types';
+    import Logo from './logo.svelte';
 
     let {
-        login,
+        action,
         user,
         signInUrl,
-        error = "",
+        phase,
+        error = ''
     }: {
-        login: (password: string) => void;
+        action: () => void | Promise<void>;
         user: SsoUser | null;
         signInUrl: string | null;
+        phase: 'preparing' | 'locked' | 'unlocking' | 'ready' | 'unsupported' | 'error';
         error?: string;
     } = $props();
 
-    let loginVisible = $state(false);
-    let password = $state("");
+    let visible = $state(false);
 
-    const in_text_delay = 1000;
-    const out_text_delay = 0;
+    const textDelay = 250;
+
+    const actionLabel = $derived(
+        phase === 'preparing'
+            ? 'Preparing secure storage…'
+            : phase === 'unlocking'
+              ? 'Waiting for passkey…'
+              : phase === 'error'
+                ? 'Try again'
+                : 'Unlock with passkey'
+    );
 
     onMount(() => {
-        loginVisible = true;
+        visible = true;
     });
 </script>
 
 <div class="container mx-auto">
-    <div class="flex flex-col h-[calc(100dvh)] justify-center">
-        {#if loginVisible}
-            <div class="flex justify-center heading unselectable">
-                {#each "NOTE" as char, i (i)}
+    <div class="flex min-h-[100dvh] flex-col justify-center">
+        {#if visible}
+            <div class="heading unselectable flex justify-center">
+                {#each 'NOTE' as char, i (i)}
                     <span
+                        class="inline-block"
                         in:fly={{
                             y: 20,
-                            delay: in_text_delay + i * 150,
-                            duration: 2000,
-                            easing: quintInOut,
-                        }}
-                        out:fly={{
-                            y: -20,
-                            delay: out_text_delay + i * 150,
-                            duration: 2000,
-                            easing: quintInOut,
-                        }}
-                        style="display: inline-block;">{char}</span
+                            delay: textDelay + i * 100,
+                            duration: 900,
+                            easing: quintInOut
+                        }}>{char}</span
                     >
                 {/each}
             </div>
@@ -56,76 +59,48 @@
                 <Logo width="30%" accentColor="#EB1C76" />
             </div>
 
-            <div class="flex flex-col mt-20 justify-center items-center">
+            <div class="mt-12 flex flex-col items-center justify-center gap-4">
                 {#if user}
-                    <div
-                        class="flex justify-center"
-                        in:fade={{ delay: in_text_delay + 1000 }}
-                        out:fade={{ delay: out_text_delay }}
-                    >
+                    <div class="flex justify-center" in:fade={{ delay: textDelay }}>
                         <span class="text-white">
-                            Logged in as <span class="font-bold">{user.uuid}</span>
+                            Signed in as <span class="font-bold">{user.uuid}</span>
                         </span>
                     </div>
 
-                    <input
-                        class="border-b border-b-gray-300 bg-slate-400/10 p-2 m-2 outline-none text-white w-80 mb-4"
-                        type="password"
-                        placeholder="Password"
-                        bind:value={password}
-                        onkeydown={(event) => {
-                            if (event.key === "Enter") login(password);
-                        }}
-                        in:fly={{
-                            x: -20,
-                            delay: in_text_delay + 150,
-                            duration: 2000,
-                            easing: quintInOut,
-                        }}
-                        out:fly={{
-                            x: 20,
-                            delay: out_text_delay + 150,
-                            duration: 2000,
-                            easing: quintInOut,
-                        }}
-                    />
-                    <button
-                        class="bg-slate-400/10 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded w-40"
-                        type="button"
-                        onclick={() => login(password)}
-                        in:fly={{
-                            x: -20,
-                            delay: in_text_delay + 300,
-                            duration: 2000,
-                            easing: quintInOut,
-                        }}
-                        out:fly={{
-                            x: 20,
-                            delay: out_text_delay + 300,
-                            duration: 2000,
-                            easing: quintInOut,
-                        }}
-                    >
-                        Unlock Note
-                    </button>
+                    {#if phase !== 'unsupported'}
+                        <button
+                            class="w-56 rounded bg-slate-400/10 px-4 py-2 font-bold text-white hover:bg-slate-700 disabled:cursor-wait disabled:opacity-60"
+                            type="button"
+                            disabled={phase === 'preparing' || phase === 'unlocking'}
+                            onclick={() => void action()}
+                        >
+                            {actionLabel}
+                        </button>
+                    {/if}
+
+                    <p class="max-w-md text-center text-sm text-slate-400">
+                        A fresh passkey verification is required after every reload and lock.
+                        There is no password or recovery fallback.
+                    </p>
+
                     {#if error}
-                        <p class="text-red-500 mt-2" transition:fade>{error}</p>
+                        <p class="max-w-md text-center text-red-400" role="alert" transition:fade>
+                            {error}
+                        </p>
                     {/if}
                 {:else}
-                    <div
-                        class="flex justify-center"
-                        in:fade={{ delay: in_text_delay + 1000 }}
-                        out:fade={{ delay: out_text_delay }}
-                    >
+                    <div class="flex justify-center" in:fade={{ delay: textDelay }}>
                         {#if signInUrl}
-                            <span class="text-white text-xl"
-                                >Login via <a
+                            <span class="text-xl text-white"
+                                >Sign in via
+                                <a
                                     href={signInUrl}
-                                    class="text-white underline font-bold text-2xl">SSO</a
+                                    class="text-2xl font-bold text-white underline"
+                                    data-sveltekit-reload>SSO passkey</a
                                 ></span
                             >
                         {:else}
-                            <span class="text-white text-xl">
+                            <span class="text-xl text-white">
                                 Sign-in is currently unavailable.
                             </span>
                         {/if}
@@ -148,10 +123,6 @@
     }
 
     .unselectable {
-        -webkit-touch-callout: none;
-        -webkit-user-select: none;
-        -moz-user-select: none;
-        -ms-user-select: none;
         user-select: none;
     }
 </style>

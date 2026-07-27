@@ -1,145 +1,326 @@
 /**
- * Client-side note encryption.
+ * Passkey-derived envelope encryption for the note.
  *
- * The stored record is a self-describing JSON envelope: the KDF name and its
- * parameters travel *inside* it, so raising the iteration count or moving to a
- * different KDF later is a version bump the same reader still handles, rather
- * than another flag-day re-encryption.
- *
- * A fresh 12-byte IV is generated on every single save. AES-GCM nonce reuse
- * under a fixed key is a genuine break — never cache or reuse one.
+ * The WebAuthn PRF output is used only as HKDF input for a key-encryption key
+ * (KEK). A random data-encryption key (DEK) encrypts the note and is stored
+ * wrapped by that KEK. Raw PRF output and unwrapped keys never leave the tab.
  */
 
-export const KDF = 'PBKDF2-SHA256';
-export const KDF_ITERATIONS = 600_000;
-export const ENVELOPE_VERSION = 1;
+import type {
+    AesGcmEnvelope,
+    KeyringMetadata,
+    SsoPasskey
+} from '$lib/types';
 
-const SALT_BYTES = 16;
-const IV_BYTES = 12;
+export const CRYPTO_VERSION = 1;
+export const CRYPTO_ALGORITHM = 'A256GCM';
+export const SETUP_BYTES = 32;
+export const IV_BYTES = 12;
+export const PRF_OUTPUT_BYTES = 32;
+export const MAX_PLAINTEXT_BYTES = 1_000_000;
+
 const KEY_BITS = 256;
+const GCM_TAG_BITS = 128;
 
-export interface Envelope {
-    v: number;
-    kdf: string;
-    iter: number;
-    salt: string;
-    iv: string;
-    ct: string;
-}
+const encoder = new TextEncoder();
+const decoder = new TextDecoder('utf-8', { fatal: true });
 
-export const toBase64 = (bytes: Uint8Array): string => {
-    let binary = '';
-    for (const byte of bytes) binary += String.fromCharCode(byte);
-    return btoa(binary);
-};
-
-export const fromBase64 = (value: string): Uint8Array => {
-    const binary = atob(value);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes;
-};
-
-export const toHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-
-export function randomSalt(): Uint8Array {
-    return crypto.getRandomValues(new Uint8Array(SALT_BYTES));
-}
-
-/**
- * Parse a stored record. Returns null for an empty or unreadable record, which
- * the caller treats as "fresh note" — any password is then accepted and the
- * first save mints the salt.
- */
-export function parseEnvelope(stored: string): Envelope | null {
-    if (!stored) return null;
-    try {
-        const parsed = JSON.parse(stored);
-        if (
-            typeof parsed?.v !== 'number' ||
-            typeof parsed.kdf !== 'string' ||
-            typeof parsed.iter !== 'number' ||
-            typeof parsed.salt !== 'string' ||
-            typeof parsed.iv !== 'string' ||
-            typeof parsed.ct !== 'string'
-        ) {
-            return null;
-        }
-        return parsed as Envelope;
-    } catch {
-        return null;
+export class WebAuthnUnavailableError extends Error {
+    constructor() {
+        super('This browser does not support WebAuthn.');
+        this.name = 'WebAuthnUnavailableError';
     }
 }
 
-/**
- * Stretch the password into raw key bits.
- *
- * Derived as bits rather than straight to a CryptoKey so the console pane can
- * narrate the result — the material is in page memory either way, and the
- * narration is the point of this app.
- *
- * The password is fed in directly: the previous SHA-256-then-PBKDF2 pre-hash
- * bought nothing and capped the effective input.
- */
-export async function deriveKeyBits(
-    password: string,
-    salt: Uint8Array,
-    iterations: number = KDF_ITERATIONS
-): Promise<ArrayBuffer> {
-    const material = await crypto.subtle.importKey(
-        'raw',
-        new TextEncoder().encode(password),
-        { name: 'PBKDF2' },
-        false,
-        ['deriveBits']
-    );
-
-    return crypto.subtle.deriveBits(
-        { name: 'PBKDF2', salt: salt as BufferSource, iterations, hash: 'SHA-256' },
-        material,
-        KEY_BITS
-    );
+export class PrfUnavailableError extends Error {
+    constructor() {
+        super('This passkey did not return a WebAuthn PRF result.');
+        this.name = 'PrfUnavailableError';
+    }
 }
 
-export function importKey(bits: ArrayBuffer): Promise<CryptoKey> {
-    return crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, [
-        'encrypt',
-        'decrypt'
+export class CredentialMismatchError extends Error {
+    constructor() {
+        super('The selected passkey does not belong to this account.');
+        this.name = 'CredentialMismatchError';
+    }
+}
+
+export function toBase64url(bytes: Uint8Array): string {
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+export function fromBase64url(value: string, expectedLength?: number): Uint8Array {
+    if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+        throw new Error('Invalid base64url value');
+    }
+    const padded = value
+        .replace(/-/g, '+')
+        .replace(/_/g, '/')
+        .padEnd(Math.ceil(value.length / 4) * 4, '=');
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    if (toBase64url(bytes) !== value) {
+        throw new Error('Non-canonical base64url value');
+    }
+    if (expectedLength !== undefined && bytes.length !== expectedLength) {
+        throw new Error(`Expected ${expectedLength} bytes`);
+    }
+    return bytes;
+}
+
+export function createSetupInputs(): { prfInput: string; hkdfSalt: string } {
+    return {
+        prfInput: toBase64url(crypto.getRandomValues(new Uint8Array(SETUP_BYTES))),
+        hkdfSalt: toBase64url(crypto.getRandomValues(new Uint8Array(SETUP_BYTES)))
+    };
+}
+
+function context(parts: Array<string | number>): Uint8Array {
+    return encoder.encode(JSON.stringify(parts));
+}
+
+function kekInfo(uuid: string, metadata: KeyringMetadata): Uint8Array {
+    return context([
+        'note.timben.net',
+        'key-encryption-key',
+        CRYPTO_VERSION,
+        uuid,
+        metadata.credentialId
     ]);
 }
 
-export async function decrypt(envelope: Envelope, key: CryptoKey): Promise<string> {
-    const plaintext = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: fromBase64(envelope.iv) as BufferSource },
-        key,
-        fromBase64(envelope.ct) as BufferSource
-    );
-    return new TextDecoder().decode(plaintext);
+function wrapAad(uuid: string, metadata: KeyringMetadata): Uint8Array {
+    return context([
+        'note.timben.net',
+        'dek-wrap',
+        CRYPTO_VERSION,
+        uuid,
+        metadata.credentialId,
+        metadata.prfInput
+    ]);
 }
 
-export async function encrypt(
-    plaintext: string,
-    key: CryptoKey,
-    salt: Uint8Array
-): Promise<string> {
-    // Fresh nonce per save. This is the whole point of the format change.
-    const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+function noteAad(uuid: string, metadata: KeyringMetadata, revision: number): Uint8Array {
+    return context([
+        'note.timben.net',
+        'note',
+        CRYPTO_VERSION,
+        uuid,
+        metadata.credentialId,
+        metadata.prfInput,
+        revision
+    ]);
+}
 
-    const ciphertext = await crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv: iv as BufferSource },
-        key,
-        new TextEncoder().encode(plaintext)
-    );
-
-    const envelope: Envelope = {
-        v: ENVELOPE_VERSION,
-        kdf: KDF,
-        iter: KDF_ITERATIONS,
-        salt: toBase64(salt),
-        iv: toBase64(iv),
-        ct: toBase64(new Uint8Array(ciphertext))
+function gcmParams(iv: Uint8Array, additionalData: Uint8Array): AesGcmParams {
+    return {
+        name: 'AES-GCM',
+        iv: iv as Uint8Array<ArrayBuffer>,
+        additionalData: additionalData as Uint8Array<ArrayBuffer>,
+        tagLength: GCM_TAG_BITS
     };
+}
 
-    return JSON.stringify(envelope);
+function parseEnvelope(envelope: AesGcmEnvelope): { iv: Uint8Array; ciphertext: Uint8Array } {
+    if (
+        envelope.v !== CRYPTO_VERSION ||
+        envelope.alg !== CRYPTO_ALGORITHM
+    ) {
+        throw new Error('Unsupported encryption envelope');
+    }
+    const iv = fromBase64url(envelope.iv, IV_BYTES);
+    const ciphertext = fromBase64url(envelope.ct);
+    if (ciphertext.length < GCM_TAG_BITS / 8) {
+        throw new Error('Invalid encryption envelope');
+    }
+    return { iv, ciphertext };
+}
+
+function encodedCredentialId(credentialId: string): Uint8Array {
+    return fromBase64url(credentialId);
+}
+
+export function webauthnSupported(): boolean {
+    return (
+        typeof window !== 'undefined' &&
+        'PublicKeyCredential' in window &&
+        typeof navigator.credentials?.get === 'function'
+    );
+}
+
+/**
+ * Evaluate the PRF for the one credential attached to the authenticated SSO
+ * account. The assertion is not used for authentication here; the SSO session
+ * already did that. Its only local product is the authenticator-held PRF.
+ */
+export async function runPrfCeremony(
+    passkey: SsoPasskey,
+    prfInput: string
+): Promise<Uint8Array> {
+    if (!webauthnSupported()) throw new WebAuthnUnavailableError();
+
+    const input = fromBase64url(prfInput, SETUP_BYTES);
+    const credential = (await navigator.credentials.get({
+        publicKey: {
+            challenge: crypto.getRandomValues(new Uint8Array(32)),
+            rpId: passkey.rpId,
+            allowCredentials: [
+                {
+                    type: 'public-key',
+                    id: encodedCredentialId(passkey.credentialId) as Uint8Array<ArrayBuffer>
+                }
+            ],
+            userVerification: 'required',
+            extensions: {
+                prf: { eval: { first: input } }
+            } as AuthenticationExtensionsClientInputs
+        }
+    })) as PublicKeyCredential | null;
+
+    if (credential === null) throw new PrfUnavailableError();
+    if (credential.id !== passkey.credentialId) throw new CredentialMismatchError();
+
+    const extensionResults = credential.getClientExtensionResults() as {
+        prf?: { results?: { first?: ArrayBuffer } };
+    };
+    const first = extensionResults.prf?.results?.first;
+    if (first === undefined) throw new PrfUnavailableError();
+
+    const output = new Uint8Array(first);
+    if (output.length !== PRF_OUTPUT_BYTES) {
+        output.fill(0);
+        throw new PrfUnavailableError();
+    }
+    const result = new Uint8Array(output);
+    output.fill(0);
+    return result;
+}
+
+export async function deriveKek(
+    prfOutput: Uint8Array,
+    metadata: KeyringMetadata,
+    uuid: string
+): Promise<CryptoKey> {
+    if (prfOutput.length !== PRF_OUTPUT_BYTES) {
+        throw new Error('Invalid PRF output length');
+    }
+    const material = await crypto.subtle.importKey(
+        'raw',
+        prfOutput as Uint8Array<ArrayBuffer>,
+        'HKDF',
+        false,
+        ['deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+        {
+            name: 'HKDF',
+            hash: 'SHA-256',
+            salt: fromBase64url(metadata.hkdfSalt, SETUP_BYTES) as Uint8Array<ArrayBuffer>,
+            info: kekInfo(uuid, metadata) as Uint8Array<ArrayBuffer>
+        },
+        material,
+        { name: 'AES-GCM', length: KEY_BITS },
+        false,
+        ['wrapKey', 'unwrapKey']
+    );
+}
+
+/** The temporary extractable DEK exists only long enough to wrap it. */
+export function generateDek(): Promise<CryptoKey> {
+    return crypto.subtle.generateKey(
+        { name: 'AES-GCM', length: KEY_BITS },
+        true,
+        ['encrypt', 'decrypt']
+    );
+}
+
+export async function wrapDek(
+    dek: CryptoKey,
+    kek: CryptoKey,
+    metadata: KeyringMetadata,
+    uuid: string
+): Promise<AesGcmEnvelope> {
+    const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+    const wrapped = await crypto.subtle.wrapKey(
+        'raw',
+        dek,
+        kek,
+        gcmParams(iv, wrapAad(uuid, metadata))
+    );
+    return {
+        v: CRYPTO_VERSION,
+        alg: CRYPTO_ALGORITHM,
+        iv: toBase64url(iv),
+        ct: toBase64url(new Uint8Array(wrapped))
+    };
+}
+
+/** Everyday DEKs are deliberately non-extractable. */
+export async function unwrapDek(
+    envelope: AesGcmEnvelope,
+    kek: CryptoKey,
+    metadata: KeyringMetadata,
+    uuid: string
+): Promise<CryptoKey> {
+    const { iv, ciphertext } = parseEnvelope(envelope);
+    return crypto.subtle.unwrapKey(
+        'raw',
+        ciphertext as Uint8Array<ArrayBuffer>,
+        kek,
+        gcmParams(iv, wrapAad(uuid, metadata)),
+        { name: 'AES-GCM', length: KEY_BITS },
+        false,
+        ['encrypt', 'decrypt']
+    );
+}
+
+export async function encryptNote(
+    plaintext: string,
+    dek: CryptoKey,
+    metadata: KeyringMetadata,
+    uuid: string,
+    revision: number
+): Promise<AesGcmEnvelope> {
+    if (!Number.isSafeInteger(revision) || revision < 1) {
+        throw new Error('Invalid note revision');
+    }
+    const encoded = encoder.encode(plaintext);
+    if (encoded.length > MAX_PLAINTEXT_BYTES) {
+        throw new Error('Note is too large');
+    }
+    const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+    const ciphertext = await crypto.subtle.encrypt(
+        gcmParams(iv, noteAad(uuid, metadata, revision)),
+        dek,
+        encoded
+    );
+    return {
+        v: CRYPTO_VERSION,
+        alg: CRYPTO_ALGORITHM,
+        iv: toBase64url(iv),
+        ct: toBase64url(new Uint8Array(ciphertext))
+    };
+}
+
+export async function decryptNote(
+    envelope: AesGcmEnvelope,
+    dek: CryptoKey,
+    metadata: KeyringMetadata,
+    uuid: string,
+    revision: number
+): Promise<string> {
+    if (!Number.isSafeInteger(revision) || revision < 1) {
+        throw new Error('Invalid note revision');
+    }
+    const { iv, ciphertext } = parseEnvelope(envelope);
+    const plaintext = await crypto.subtle.decrypt(
+        gcmParams(iv, noteAad(uuid, metadata, revision)),
+        dek,
+        ciphertext as Uint8Array<ArrayBuffer>
+    );
+    return decoder.decode(plaintext);
 }

@@ -71,7 +71,24 @@ export async function resolveUser(sessionId: string): Promise<SsoUser | null> {
         if (res.ok) {
             const data = await res.json();
             if (data?.success === true && typeof data.user?.uuid === 'string') {
-                user = { uuid: data.user.uuid, elevated: data.user.elevated === true };
+                const rawPasskey = data.user.passkey;
+                const passkey =
+                    rawPasskey !== null &&
+                    typeof rawPasskey === 'object' &&
+                    typeof rawPasskey.credentialId === 'string' &&
+                    typeof rawPasskey.rpId === 'string' &&
+                    typeof rawPasskey.prfCapable === 'boolean'
+                        ? {
+                            credentialId: rawPasskey.credentialId,
+                            rpId: rawPasskey.rpId,
+                            prfCapable: rawPasskey.prfCapable
+                        }
+                        : null;
+                user = {
+                    uuid: data.user.uuid,
+                    elevated: data.user.elevated === true,
+                    passkey
+                };
             }
         }
     } catch {

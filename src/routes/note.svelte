@@ -1,178 +1,223 @@
 <script lang="ts">
-    import { onMount } from "svelte";
-    import { cubicIn, cubicOut } from "svelte/easing";
-    import { draw, fade, fly } from "svelte/transition";
-
-    import {
-        KDF_ITERATIONS,
-        deriveKeyBits,
-        decrypt,
-        encrypt,
-        fromBase64,
-        importKey,
-        parseEnvelope,
-        randomSalt,
-        toHex,
-    } from "$lib/crypto";
-    import { wait, waitMin } from "../util";
-    import { logStore, noteStore } from "./store";
+    import { onDestroy, onMount } from 'svelte';
+    import { cubicIn, cubicOut } from 'svelte/easing';
+    import { draw, fade, fly } from 'svelte/transition';
+    import { encryptNote } from '$lib/crypto';
+    import type { KeyringMetadata } from '$lib/types';
+    import { logStore } from './store';
 
     let {
         uuid,
         signOutUrl,
-        logout,
+        initialContent,
+        initialRevision,
+        metadata,
+        dek,
+        onLock
     }: {
         uuid: string;
         signOutUrl: string | null;
-        logout: () => void;
+        initialContent: string;
+        initialRevision: number;
+        metadata: KeyringMetadata;
+        dek: CryptoKey;
+        onLock: () => void;
     } = $props();
 
     let visible = $state(false);
-    let content = $state("");
-    let disabled = $state(true);
-    let redactSensitiveContent = $state(true);
-    let savestate = $state("loading...");
+    // svelte-ignore state_referenced_locally
+    let content = $state(initialContent);
+    // svelte-ignore state_referenced_locally
+    let revision = $state(initialRevision);
+    let savestate = $state('saved');
+    let dirty = $state(false);
+    let conflict = $state(false);
+    let fatalMessage = $state('');
+    let pendingExit = $state<'lock' | 'signout' | null>(null);
+    let exitFailed = $state(false);
 
-    let encryptionKey: CryptoKey | null = null;
-    let salt: Uint8Array | null = null;
-
-    /** Single debounce timer for the component — not one per render. */
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
+    let activeSave: Promise<boolean> | null = null;
 
-    onMount(async () => {
+    function elapsed(start: number): string {
+        return `${Math.round(performance.now() - start).toLocaleString()} ms`;
+    }
+
+    onMount(() => {
         visible = true;
-
-        const note = $noteStore;
-        if (!note) {
-            logout();
-            return;
-        }
-
-        const envelope = parseEnvelope(note.stored);
-
-        // No envelope means a note that has never been saved: any password is
-        // accepted, and this first save mints the salt.
-        salt = envelope ? fromBase64(envelope.salt) : randomSalt();
-        const iterations = envelope?.iter ?? KDF_ITERATIONS;
-
-        logStore.add(
-            `deriving key from password '${redacted(note.password)}' using PBKDF2-SHA256, ${iterations.toLocaleString()} iterations`,
-        );
-
-        const bits = await waitMin(deriveKeyBits(note.password, salt, iterations), 500);
-        logStore.add(`derived encryption key: ${redacted(toHex(new Uint8Array(bits)))}`);
-
-        encryptionKey = await importKey(bits);
-        logStore.add(`imported derived key as AES-GCM encryption key`);
-
-        if (!envelope) {
-            await wait(500);
-            savestate = "saved";
-            disabled = false;
-            logStore.add(`no stored content, waiting for user input...`);
-            return;
-        }
-
-        logStore.add(`read iv '${redacted(envelope.iv)}' from stored envelope`);
-        await wait(500);
-
-        try {
-            content = await decrypt(envelope, encryptionKey);
-            await wait(500);
-            disabled = false;
-            savestate = "saved";
-            logStore.add(`successfully decrypted content locally`);
-            document.getElementById("textarea")?.focus();
-        } catch (e) {
-            savestate = "error";
-            content =
-                "Failed to decrypt content. Are you sure you entered the correct password?";
-            logStore.add(`ERROR: failed to decrypt content`);
-            logStore.add(`Are you sure you entered the correct password?`);
-            console.error(e);
-        }
+        document.getElementById('textarea')?.focus();
     });
 
-    async function save() {
-        if (encryptionKey === null || salt === null) {
-            logStore.add(`ERROR: no encryption key available`);
+    onDestroy(() => {
+        if (saveTimer) clearTimeout(saveTimer);
+    });
+
+    async function saveSnapshot(): Promise<boolean> {
+        const snapshot = content;
+        const baseRevision = revision;
+        const nextRevision = baseRevision + 1;
+        savestate = 'encrypting…';
+        const started = performance.now();
+
+        let ciphertext;
+        try {
+            ciphertext = await encryptNote(
+                snapshot,
+                dek,
+                metadata,
+                uuid,
+                nextRevision
+            );
+            logStore.add(
+                `encrypted revision ${nextRevision.toLocaleString()} locally with a fresh AES-GCM iv in ${elapsed(started)}`
+            );
+        } catch (error) {
+            console.error('note encryption failed', error);
+            savestate = 'error';
+            logStore.add('ERROR: local note encryption failed');
+            return false;
+        }
+
+        savestate = 'saving…';
+        try {
+            const response = await fetch('/api/note', {
+                method: 'PUT',
+                headers: {
+                    accept: 'application/json',
+                    'content-type': 'application/json'
+                },
+                body: JSON.stringify({ ciphertext, baseRevision })
+            });
+            const body = await response.json().catch(() => null);
+
+            if (response.status === 409 && body?.error === 'conflict') {
+                conflict = true;
+                savestate = 'conflict';
+                logStore.add(
+                    `ERROR: revision conflict; refusing to overwrite revision ${body.current?.revision ?? 'unknown'}`
+                );
+                return false;
+            }
+            if (response.status === 409 && body?.error === 'credential_mismatch') {
+                fatalMessage = 'The SSO passkey no longer matches this encrypted note.';
+                savestate = 'credential mismatch';
+                logStore.add('ERROR: SSO credential no longer matches the keyring');
+                return false;
+            }
+            if (!response.ok || typeof body?.revision !== 'number') {
+                savestate = 'error';
+                if (response.status === 401) {
+                    fatalMessage = 'Your SSO session expired. Sign in again.';
+                    logStore.add('ERROR: SSO session expired before save');
+                } else {
+                    logStore.add(`ERROR: encrypted save failed (${response.status})`);
+                }
+                return false;
+            }
+
+            revision = body.revision;
+            dirty = content !== snapshot;
+            savestate = dirty ? 'waiting…' : 'saved';
+            logStore.add(`stored encrypted revision ${revision.toLocaleString()}`);
+            return true;
+        } catch (error) {
+            console.error('note save failed', error);
+            savestate = 'offline';
+            logStore.add('ERROR: could not reach the server');
+            return false;
+        }
+    }
+
+    async function flush(): Promise<boolean> {
+        if (saveTimer) {
+            clearTimeout(saveTimer);
+            saveTimer = undefined;
+        }
+        while (dirty && !conflict && fatalMessage === '') {
+            const running = activeSave ?? saveSnapshot();
+            activeSave = running;
+            const ok = await running;
+            if (activeSave === running) activeSave = null;
+            if (!ok) return false;
+        }
+        return !dirty && !conflict && fatalMessage === '';
+    }
+
+    function scheduleSave(): void {
+        if (pendingExit !== null || conflict || fatalMessage !== '') return;
+        dirty = true;
+        savestate = 'waiting…';
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+            saveTimer = undefined;
+            void flush();
+        }, 700);
+    }
+
+    function completeExit(kind: 'lock' | 'signout'): void {
+        content = '';
+        dirty = false;
+        if (kind === 'signout' && signOutUrl !== null) {
+            onLock();
+            window.location.assign(signOutUrl);
             return;
         }
+        onLock();
+    }
 
-        savestate = "saving...";
-        // A fresh IV is generated inside encrypt() on every call.
-        const envelope = await encrypt(content, encryptionKey, salt);
-        logStore.add(`successfully encrypted content locally with a fresh iv`);
-
-        try {
-            const res = await fetch("/api", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ content: envelope }),
-            });
-
-            if (res.ok) {
-                savestate = "saved";
-                logStore.add(`successfully saved encrypted content to server`);
-            } else {
-                savestate = "error";
-                logStore.add(
-                    res.status === 401
-                        ? `ERROR: session expired, sign in again`
-                        : `ERROR: failed to save content to server`,
-                );
-            }
-        } catch {
-            savestate = "error";
-            logStore.add(`ERROR: could not reach the server`);
+    async function requestExit(kind: 'lock' | 'signout'): Promise<void> {
+        if (kind === 'signout' && signOutUrl === null) return;
+        pendingExit = kind;
+        exitFailed = false;
+        savestate = dirty ? 'securing changes…' : 'locking…';
+        if (await flush()) {
+            completeExit(kind);
+            return;
         }
+        exitFailed = true;
+        savestate = 'save failed';
     }
 
-    /** Debounced save. Bound to `oninput`, which — unlike `keypress` — fires for
-     *  Backspace, Delete, cut and paste. */
-    function scheduleSave() {
-        if (saveTimer) clearTimeout(saveTimer);
-        savestate = "waiting...";
-        saveTimer = setTimeout(save, 1000);
-    }
-
-    function redacted(message: string) {
-        return redactSensitiveContent
-            ? "***REDACTBEGIN" + message.split("").join("​") + "REDACTEND***"
-            : message;
+    function discardAndExit(): void {
+        const kind = pendingExit;
+        if (kind === null) return;
+        completeExit(kind);
     }
 
     function scrollToNewMessages(node: HTMLDivElement, _args: string[]) {
-        const scroll = () => node.scroll({ top: node.scrollHeight, behavior: "smooth" });
+        const scroll = () => node.scroll({ top: node.scrollHeight, behavior: 'smooth' });
         scroll();
         return { update: scroll };
     }
 </script>
 
 {#if visible}
-    <div class="h-full flex flex-col flex-auto">
+    <div class="flex h-full flex-auto flex-col">
         <nav
-            class="lg:hidden flex flex-row justify-between items-center bg-slate-900 p-4"
+            class="flex flex-row items-center justify-between bg-slate-900 p-4 lg:hidden"
             transition:fly={{ y: -10, duration: 500 }}
         >
             <div class="flex flex-row items-center">
                 <img class="h-6 w-6 rounded-full" src="favicon.ico" alt="Logo" />
-                <span class="text-slate-100 ml-4 uppercase logo-name unselectable">
+                <span class="logo-name unselectable ml-4 uppercase text-slate-100">
                     Note
                 </span>
             </div>
             <div class="flex flex-row gap-4">
                 <button
-                    class="text-sm bg-transparent text-slate-300 rounded hover:text-white"
-                    onclick={logout}
+                    class="rounded bg-transparent text-sm text-slate-300 hover:text-white"
+                    onclick={() => void requestExit('lock')}
                 >
                     lock
                 </button>
                 {#if signOutUrl}
                     <a
-                        class="text-sm bg-transparent text-red-600 rounded hover:text-red-800"
+                        class="rounded bg-transparent text-sm text-red-600 hover:text-red-800"
                         href={signOutUrl}
-                        data-sveltekit-reload
+                        onclick={(event) => {
+                            event.preventDefault();
+                            void requestExit('signout');
+                        }}
                     >
                         sign out
                     </a>
@@ -189,19 +234,19 @@
                     y2="0"
                     stroke-width="2"
                     stroke="white"
-                    in:draw={{ delay: 500, duration: 2000, easing: cubicOut }}
-                    out:draw={{ delay: 500, duration: 1000, easing: cubicIn }}
+                    in:draw={{ delay: 200, duration: 800, easing: cubicOut }}
+                    out:draw={{ duration: 400, easing: cubicIn }}
                 />
             </g>
         </svg>
 
-        <div class="flex flex-row h-full">
-            <div class="hidden lg:flex h-full text-white p-4">
+        <div class="flex h-full flex-row">
+            <div class="hidden h-full p-4 text-white lg:flex">
                 <ul class="flex flex-col gap-2">
                     <li>
                         <button
-                            class="bg-transparent text-slate-300 rounded border border-slate-500 hover:text-slate-900 hover:bg-slate-300 p-1 px-2 w-full"
-                            onclick={logout}
+                            class="w-full rounded border border-slate-500 bg-transparent p-1 px-2 text-slate-300 hover:bg-slate-300 hover:text-slate-900"
+                            onclick={() => void requestExit('lock')}
                         >
                             Lock
                         </button>
@@ -209,9 +254,12 @@
                     {#if signOutUrl}
                         <li>
                             <a
-                                class="block text-center bg-transparent text-red-600 rounded border border-red-600 hover:text-slate-100 hover:bg-red-600 p-1 px-2"
+                                class="block rounded border border-red-600 p-1 px-2 text-center text-red-600 hover:bg-red-600 hover:text-slate-100"
                                 href={signOutUrl}
-                                data-sveltekit-reload
+                                onclick={(event) => {
+                                    event.preventDefault();
+                                    void requestExit('signout');
+                                }}
                             >
                                 Sign out
                             </a>
@@ -221,55 +269,71 @@
             </div>
 
             <div
-                class="basis-full lg:basis-7/12 p-5 lg:p-10 h-full"
-                transition:fly={{ x: -50, delay: 500, duration: 2000 }}
+                class="h-full basis-full p-5 lg:basis-7/12 lg:p-10"
+                transition:fly={{ x: -50, delay: 200, duration: 800 }}
             >
-                <div class="flex flex-col bg-transparent text-white rounded-lg h-full p-3">
-                    <div class="flex flex-row mb-2 p-2">
-                        <h1 class="flex text-left flex-1 lowercase">
-                            Note - {uuid}
-                        </h1>
+                <div class="flex h-full flex-col rounded-lg bg-transparent p-3 text-white">
+                    <div class="mb-2 flex flex-row p-2">
+                        <h1 class="flex flex-1 text-left lowercase">Note - {uuid}</h1>
                         <h2 class="text-right">{savestate}</h2>
                     </div>
-                    <hr class="hidden lg:inline mb-2" />
+                    <hr class="mb-2 hidden lg:inline" />
+
+                    {#if conflict}
+                        <p class="m-4 rounded border border-amber-500 p-3 text-amber-300" role="alert">
+                            Another tab saved a newer revision. Lock and unlock again to load it;
+                            this tab will not overwrite it.
+                        </p>
+                    {/if}
+
+                    {#if fatalMessage}
+                        <p class="m-4 rounded border border-red-500 p-3 text-red-300" role="alert">
+                            {fatalMessage} Editing is disabled to prevent an unsafe overwrite.
+                        </p>
+                    {/if}
+
+                    {#if exitFailed}
+                        <div class="m-4 rounded border border-red-500 p-3 text-red-300" role="alert">
+                            <p>Unsaved changes could not be stored.</p>
+                            <div class="mt-3 flex gap-3">
+                                <button
+                                    class="rounded border border-slate-400 px-3 py-1"
+                                    onclick={() => {
+                                        if (pendingExit !== null) void requestExit(pendingExit);
+                                    }}>Retry</button
+                                >
+                                <button
+                                    class="rounded border border-red-500 px-3 py-1"
+                                    onclick={discardAndExit}>Discard changes and continue</button
+                                >
+                            </div>
+                        </div>
+                    {/if}
+
                     <textarea
                         id="textarea"
-                        class="bg-transparent h-full w-full p-4 rounded-b-lg outline-none {disabled
-                            ? 'text-gray-500'
-                            : 'text-white'}"
-                        placeholder="Type something..."
-                        {disabled}
+                        class="h-full w-full rounded-b-lg bg-transparent p-4 outline-none disabled:text-gray-500"
+                        placeholder="Type something…"
+                        disabled={conflict || fatalMessage !== '' || pendingExit !== null}
                         bind:value={content}
                         oninput={scheduleSave}
                     ></textarea>
                 </div>
             </div>
+
             <div
-                class="hidden lg:flex flex-auto h-full basis-5/12 p-10"
-                transition:fade={{ delay: 1000, duration: 500 }}
+                class="hidden h-full basis-5/12 flex-auto p-10 lg:flex"
+                transition:fade={{ delay: 300, duration: 400 }}
             >
-                <div class="flex flex-col flex-1 h-full bg-neutral-900 rounded-lg p-4">
-                    <div class="flex flex-row justify-end items-center">
-                        <span class="grow text-2xl text-white p-4"> console </span>
-                        <span class="text-white p-4"> redact sensitive content </span>
-                        <input type="checkbox" bind:checked={redactSensitiveContent} />
-                    </div>
+                <div class="flex h-full flex-1 flex-col rounded-lg bg-neutral-900 p-4">
+                    <span class="p-4 text-2xl text-white">console</span>
                     <hr class="mb-2" />
                     <div
-                        class="flex flex-col min-h-0 h-full flex-auto overflow-y-auto"
+                        class="flex h-full min-h-0 flex-auto flex-col overflow-y-auto"
                         use:scrollToNewMessages={$logStore}
                     >
                         {#each $logStore as message, i (i)}
-                            <p class="text-lg console-message">
-                                {redactSensitiveContent
-                                    ? message.replaceAll(
-                                          /\*\*\*REDACTBEGIN.*?REDACTEND\*\*\*/gm,
-                                          "[REDACTED]",
-                                      )
-                                    : message
-                                          .replaceAll(/\*\*\*REDACTBEGIN/gm, "")
-                                          .replaceAll(/REDACTEND\*\*\*/gm, "")}
-                            </p>
+                            <p class="console-message text-lg">{message}</p>
                         {/each}
                     </div>
                 </div>
@@ -301,7 +365,6 @@
         font-family: "Josefin Sans";
         letter-spacing: 0.1em;
         font-weight: 300;
-        color: var(--color-slate-100);
     }
     .console-message {
         color: var(--color-slate-100);
@@ -312,10 +375,6 @@
         overflow-wrap: anywhere;
     }
     .unselectable {
-        -webkit-touch-callout: none;
-        -webkit-user-select: none;
-        -moz-user-select: none;
-        -ms-user-select: none;
         user-select: none;
     }
 </style>

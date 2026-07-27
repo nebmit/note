@@ -1,19 +1,13 @@
-import { writable, type Writable } from 'svelte/store';
+import { writable } from 'svelte/store';
 
-const logsMessagesStore = writable(new Array<string>());
+const messages = writable<string[]>([]);
 
 export const logStore = {
-    subscribe: logsMessagesStore.subscribe,
-    add: (message: string) => {
-        logsMessagesStore.update((messages) => [...messages, message]);
+    subscribe: messages.subscribe,
+    add(message: string) {
+        messages.update((current) => [...current, message]);
     },
-    clear: () => {
-        logsMessagesStore.set([]);
+    clear() {
+        messages.set([]);
     }
 };
-
-export const noteStore: Writable<{
-    password: string;
-    /** The stored envelope, or '' for a note that has never been saved. */
-    stored: string;
-} | null> = writable(null);
