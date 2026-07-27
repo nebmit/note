@@ -32,6 +32,13 @@ function database(): DatabaseSync {
     return db;
 }
 
+/**
+ * Liveness probe for the health endpoint.
+ */
+export function pingDb(): void {
+    database().prepare('SELECT 1').get();
+}
+
 /** The stored envelope for a user, or '' when they have no note yet. */
 export function readNote(uuid: string): string {
     const row = database()
