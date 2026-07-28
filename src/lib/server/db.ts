@@ -107,6 +107,18 @@ function parseEnvelope(value: string): AesGcmEnvelope {
     return JSON.parse(value) as AesGcmEnvelope;
 }
 
+function envelopesEqual(
+    left: AesGcmEnvelope,
+    right: AesGcmEnvelope
+): boolean {
+    return (
+        left.v === right.v &&
+        left.alg === right.alg &&
+        left.iv === right.iv &&
+        left.ct === right.ct
+    );
+}
+
 function toApiState(row: NoteRow | undefined): NoteApiState {
     if (row === undefined) return { state: 'absent' };
     const keyring = metadata(row);
@@ -207,10 +219,10 @@ export type SaveResult =
     | { ok: false; reason: 'not_found' }
     | { ok: false; reason: 'credential_mismatch' }
     | {
-          ok: false;
-          reason: 'conflict';
-          current: { ciphertext: AesGcmEnvelope; revision: number };
-      };
+        ok: false;
+        reason: 'conflict';
+        current: { ciphertext: AesGcmEnvelope; revision: number };
+    };
 
 export function saveNote(
     uuid: string,
@@ -226,6 +238,12 @@ export function saveNote(
         }
         if (current.credential_id !== credentialId) {
             return { ok: false, reason: 'credential_mismatch' };
+        }
+        if (
+            current.revision === baseRevision + 1 &&
+            envelopesEqual(parseEnvelope(current.content), ciphertext)
+        ) {
+            return { ok: true, revision: current.revision };
         }
         if (current.revision !== baseRevision) {
             return {

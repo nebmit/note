@@ -25,11 +25,14 @@
     import { base64urlBytes, byteCount, shortUuid } from "./format";
     import Login from "./login.svelte";
     import Note from "./note.svelte";
+    import {
+        resolveAuthoritativeNote,
+        type LockedNoteState,
+    } from "./noteState";
     import Notice from "./notice.svelte";
     import { fact, logStore, masked } from "./store";
     import type { PageData } from "./$types";
 
-    type LockedState = Exclude<NoteApiState, { state: "absent" }>;
     type Phase =
         | "preparing"
         | "locked"
@@ -54,7 +57,7 @@
 
     let phase = $state<Phase>("preparing");
     let failure = $state<Failure | null>(null);
-    let prepared = $state<LockedState | null>(null);
+    let prepared = $state<LockedNoteState | null>(null);
     let unlocked = $state<UnlockedNote | null>(null);
 
     let ceremony: AbortController | null = null;
@@ -75,12 +78,24 @@
                 typeof body?.error === "string"
                     ? body.error
                     : `request_failed_${response.status}`;
+            if (code === "credential_mismatch") {
+                throw new CredentialMismatchError();
+            }
             throw new Error(code);
         }
         return body as T;
     }
 
-    function verifyCredential(state: LockedState): void {
+    async function loadNoteState(): Promise<NoteApiState> {
+        return readJson<NoteApiState>(
+            await fetch("/api/note", {
+                headers: { accept: "application/json" },
+                cache: "no-store",
+            }),
+        );
+    }
+
+    function verifyCredential(state: LockedNoteState): void {
         if (
             data.user?.passkey === null ||
             data.user === null ||
@@ -127,10 +142,7 @@
             ],
         });
         try {
-            const response = await fetch("/api/note", {
-                headers: { accept: "application/json" },
-            });
-            let state = await readJson<NoteApiState>(response);
+            let state = await loadNoteState();
             if (state.state === "absent") {
                 const setup = createSetupInputs();
                 logStore.add(
@@ -274,63 +286,83 @@
                 },
             );
 
-            let authoritative: NoteApiState;
-            if (state.state === "pending") {
-                logStore.add("generating a random AES-256-GCM note key");
-                const wrapStarted = performance.now();
-                const freshDek = await generateDek();
-                const wrappedDek = await wrapDek(
-                    freshDek,
-                    kek,
-                    state.keyring,
-                    user.uuid,
-                );
-                // Immediately move normal use to a non-extractable handle.
-                const workingDek = await unwrapDek(
-                    wrappedDek,
-                    kek,
-                    state.keyring,
-                    user.uuid,
-                );
-                logStore.add(
-                    `wrapped it into ${byteCount(base64urlBytes(wrappedDek.ct))}`,
-                    {
-                        durationMs: performance.now() - wrapStarted,
-                        details: [
-                            masked("iv", wrappedDek.iv),
-                            masked("wrapped dek", wrappedDek.ct),
-                            masked("aad", wrapAadText(user.uuid, state.keyring)),
-                            masked(
-                                "dek",
-                                await envelopeFingerprint(wrappedDek),
-                            ),
-                        ],
-                    },
-                );
-                const ciphertext = await encryptNote(
-                    "",
-                    workingDek,
-                    state.keyring,
-                    user.uuid,
-                    1,
-                );
-                authoritative = await readJson<NoteApiState>(
-                    await fetch("/api/note/initialize", {
-                        method: "POST",
-                        headers: {
-                            accept: "application/json",
-                            "content-type": "application/json",
+            const preparedRevision =
+                state.state === "ready" ? state.note.revision : null;
+            const authoritative = await resolveAuthoritativeNote(state, {
+                load: async () => {
+                    logStore.add("checking for a newer encrypted revision");
+                    const current = await loadNoteState();
+                    if (current.state === "ready") {
+                        logStore.add("using the latest stored envelope", {
+                            details: [
+                                fact(
+                                    "prepared",
+                                    preparedRevision?.toLocaleString() ?? "pending",
+                                ),
+                                fact(
+                                    "stored",
+                                    current.note.revision.toLocaleString(),
+                                ),
+                            ],
+                        });
+                    }
+                    return current;
+                },
+                initialize: async (pending) => {
+                    logStore.add("generating a random AES-256-GCM note key");
+                    const wrapStarted = performance.now();
+                    const freshDek = await generateDek();
+                    const wrappedDek = await wrapDek(
+                        freshDek,
+                        kek,
+                        pending.keyring,
+                        user.uuid,
+                    );
+                    // Immediately move normal use to a non-extractable handle.
+                    const workingDek = await unwrapDek(
+                        wrappedDek,
+                        kek,
+                        pending.keyring,
+                        user.uuid,
+                    );
+                    logStore.add(
+                        `wrapped it into ${byteCount(base64urlBytes(wrappedDek.ct))}`,
+                        {
+                            durationMs: performance.now() - wrapStarted,
+                            details: [
+                                masked("iv", wrappedDek.iv),
+                                masked("wrapped dek", wrappedDek.ct),
+                                masked(
+                                    "aad",
+                                    wrapAadText(user.uuid, pending.keyring),
+                                ),
+                                masked(
+                                    "dek",
+                                    await envelopeFingerprint(wrappedDek),
+                                ),
+                            ],
                         },
-                        body: JSON.stringify({ wrappedDek, ciphertext }),
-                    }),
-                );
-            } else {
-                authoritative = state;
-            }
+                    );
+                    const ciphertext = await encryptNote(
+                        "",
+                        workingDek,
+                        pending.keyring,
+                        user.uuid,
+                        1,
+                    );
+                    return readJson<NoteApiState>(
+                        await fetch("/api/note/initialize", {
+                            method: "POST",
+                            headers: {
+                                accept: "application/json",
+                                "content-type": "application/json",
+                            },
+                            body: JSON.stringify({ wrappedDek, ciphertext }),
+                        }),
+                    );
+                },
+            });
 
-            if (authoritative.state !== "ready") {
-                throw new Error("keyring_initialization_failed");
-            }
             verifyCredential(authoritative);
 
             const decryptStarted = performance.now();
@@ -483,6 +515,8 @@
     onMount(() => {
         void prepare();
         return () => {
+            ceremony?.abort();
+            ceremony = null;
             unlocked = null;
         };
     });

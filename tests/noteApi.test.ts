@@ -90,6 +90,22 @@ describe('note API authorization and state', () => {
             error: 'passkey_unavailable'
         });
     });
+
+    it('does not return a keyring belonging to a replaced SSO credential', async () => {
+        db.readNoteState.mockReturnValue(ready);
+        const response = await call(getNote, {
+            locals: {
+                user: {
+                    ...user,
+                    passkey: { ...passkey, credentialId: 'replacement' }
+                }
+            }
+        });
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toEqual({
+            error: 'credential_mismatch'
+        });
+    });
 });
 
 describe('note API mutations', () => {
@@ -136,5 +152,13 @@ describe('note API mutations', () => {
             error: 'conflict',
             current: { ciphertext, revision: 2 }
         });
+    });
+
+    it('rejects a base revision whose increment cannot be represented safely', async () => {
+        const response = await call(putNote, {
+            body: { ciphertext, baseRevision: Number.MAX_SAFE_INTEGER }
+        });
+        expect(response.status).toBe(400);
+        expect(db.saveNote).not.toHaveBeenCalled();
     });
 });

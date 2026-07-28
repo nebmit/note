@@ -1,10 +1,11 @@
 <script lang="ts">
     import { onDestroy, onMount } from 'svelte';
     import { encryptNote, noteAadText } from '$lib/crypto';
-    import type { KeyringMetadata } from '$lib/types';
+    import type { AesGcmEnvelope, KeyringMetadata } from '$lib/types';
     import { abbreviate, ago, base64urlBytes, byteCount, shortUuid } from './format';
     import Logo from './logo.svelte';
     import { createNowTicker } from './now.svelte';
+    import { isExpectedSaveRevision } from './noteState';
     import SecurityLog from './securitylog.svelte';
     import { fact, logStore, masked } from './store';
 
@@ -43,6 +44,12 @@
         body: string;
     }
 
+    interface PendingSaveAttempt {
+        snapshot: string;
+        baseRevision: number;
+        ciphertext: AesGcmEnvelope;
+    }
+
     // svelte-ignore state_referenced_locally
     let content = $state(initialContent);
     // svelte-ignore state_referenced_locally
@@ -62,6 +69,7 @@
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
     let slowSaveTimer: ReturnType<typeof setTimeout> | undefined;
     let activeSave: Promise<boolean> | null = null;
+    let pendingSaveAttempt: PendingSaveAttempt | null = null;
 
     // svelte-ignore state_referenced_locally
     const startedEmpty = initialRevision <= 1 && initialContent === '';
@@ -146,42 +154,66 @@
     }
 
     async function saveSnapshot(): Promise<boolean> {
-        const snapshot = content;
-        const baseRevision = revision;
+        if (
+            pendingSaveAttempt !== null &&
+            pendingSaveAttempt.baseRevision !== revision
+        ) {
+            pendingSaveAttempt = null;
+        }
+        const retry = pendingSaveAttempt;
+        const snapshot = retry?.snapshot ?? content;
+        const baseRevision = retry?.baseRevision ?? revision;
         const nextRevision = baseRevision + 1;
         markSlowSave();
-        const started = performance.now();
 
-        let ciphertext;
-        try {
-            // The revision is inside the note AAD, so this must be encrypted
-            // with the revision it will be stored under, not the one it was read at.
-            ciphertext = await encryptNote(
-                snapshot,
-                dek,
-                metadata,
-                uuid,
-                nextRevision
-            );
-            logStore.add(`encrypted revision ${nextRevision.toLocaleString()} locally`, {
-                durationMs: performance.now() - started,
+        let ciphertext: AesGcmEnvelope;
+        if (retry !== null) {
+            ciphertext = retry.ciphertext;
+            logStore.add(`retrying encrypted revision ${nextRevision.toLocaleString()}`, {
                 details: [
                     fact('plaintext', `${snapshot.length.toLocaleString()} chars`),
-                    fact('ciphertext', byteCount(base64urlBytes(ciphertext.ct))),
                     masked('iv', ciphertext.iv),
-                    masked('ct', abbreviate(ciphertext.ct)),
-                    masked('aad', noteAadText(uuid, metadata, nextRevision))
+                    masked('ct', abbreviate(ciphertext.ct))
                 ]
             });
-        } catch (error) {
-            console.error('note encryption failed', error);
-            clearSlowSave();
-            savestate = 'error';
-            logStore.add('local note encryption failed', {
-                level: 'error',
-                details: [fact('cause', error instanceof Error ? error.message : 'unknown')]
-            });
-            return false;
+        } else {
+            const started = performance.now();
+            try {
+                // The revision is inside the note AAD, so this must be encrypted
+                // with the revision it will be stored under, not the one it was read at.
+                ciphertext = await encryptNote(
+                    snapshot,
+                    dek,
+                    metadata,
+                    uuid,
+                    nextRevision
+                );
+                logStore.add(
+                    `encrypted revision ${nextRevision.toLocaleString()} locally`,
+                    {
+                        durationMs: performance.now() - started,
+                        details: [
+                            fact('plaintext', `${snapshot.length.toLocaleString()} chars`),
+                            fact('ciphertext', byteCount(base64urlBytes(ciphertext.ct))),
+                            masked('iv', ciphertext.iv),
+                            masked('ct', abbreviate(ciphertext.ct)),
+                            masked('aad', noteAadText(uuid, metadata, nextRevision))
+                        ]
+                    }
+                );
+            } catch (error) {
+                console.error('note encryption failed', error);
+                clearSlowSave();
+                savestate = 'error';
+                logStore.add('local note encryption failed', {
+                    level: 'error',
+                    details: [
+                        fact('cause', error instanceof Error ? error.message : 'unknown')
+                    ]
+                });
+                return false;
+            }
+            pendingSaveAttempt = { snapshot, baseRevision, ciphertext };
         }
 
         const sentAt = performance.now();
@@ -198,6 +230,7 @@
             clearSlowSave();
 
             if (response.status === 409 && body?.error === 'conflict') {
+                pendingSaveAttempt = null;
                 conflict = true;
                 savestate = 'conflict';
                 // Server-supplied and unvalidated: keep it out of the message.
@@ -218,6 +251,7 @@
                 return false;
             }
             if (response.status === 409 && body?.error === 'credential_mismatch') {
+                pendingSaveAttempt = null;
                 savestate = 'credential-mismatch';
                 fatal = {
                     title: "This passkey no longer opens this note",
@@ -229,7 +263,11 @@
                 });
                 return false;
             }
-            if (!response.ok || typeof body?.revision !== 'number') {
+            const storedRevision = body?.revision;
+            if (!response.ok || !isExpectedSaveRevision(storedRevision, nextRevision)) {
+                if (!response.ok && response.status < 500) {
+                    pendingSaveAttempt = null;
+                }
                 if (response.status === 401) {
                     savestate = 'session-expired';
                     fatal = {
@@ -256,7 +294,8 @@
                 return false;
             }
 
-            revision = body.revision;
+            pendingSaveAttempt = null;
+            revision = storedRevision;
             lastSavedAt = Date.now();
             savedTicks += 1;
             dirty = content !== snapshot;
@@ -458,7 +497,7 @@
                             Another tab saved a newer version of this note
                         </span>
                         <span class="text-[15px] leading-[1.6] font-light text-pretty text-muted">
-                            Your edits here are held in this tab and haven't been sent. Reopening
+                            Your edits here are held in this tab and haven't been stored. Reopening
                             loads the newer version — copy anything you want to keep first.
                         </span>
                         <div class="mt-1.5 flex flex-wrap gap-3">
@@ -474,7 +513,7 @@
                                 type="button"
                                 onclick={reopenWithNewer}
                             >
-                                Reopen with the newer one
+                                Discard mine and open newer
                             </button>
                         </div>
                         {#if copied === 'failed'}
@@ -555,7 +594,9 @@
                     Your last changes didn't save
                 </span>
                 <span class="text-[15px] leading-[1.6] font-light text-pretty text-muted">
-                    {exitReason} Locking now would drop everything typed since the last save.
+                    {exitReason}
+                    {pendingExit === 'signout' ? 'Signing out' : 'Locking'} now would drop
+                    everything typed since the last save.
                 </span>
             </div>
 
@@ -594,7 +635,9 @@
                     type="button"
                     onclick={discardAndExit}
                 >
-                    Discard them and lock
+                    {pendingExit === 'signout'
+                        ? 'Discard them and sign out'
+                        : 'Discard them and lock'}
                 </button>
             </div>
         </div>

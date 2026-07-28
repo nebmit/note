@@ -64,5 +64,9 @@ export function isNoteCiphertext(value: unknown): value is AesGcmEnvelope {
 }
 
 export function isBaseRevision(value: unknown): value is number {
-    return Number.isSafeInteger(value) && Number(value) >= 1;
+    return (
+        Number.isSafeInteger(value) &&
+        Number(value) >= 1 &&
+        Number(value) < Number.MAX_SAFE_INTEGER
+    );
 }

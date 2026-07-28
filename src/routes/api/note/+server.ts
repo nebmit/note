@@ -17,7 +17,14 @@ export const GET: RequestHandler = ({ locals }) => {
     if (locals.user.passkey === null) {
         return json({ error: 'passkey_unavailable' }, { status: 409, headers: NO_STORE });
     }
-    return json(readNoteState(locals.user.uuid), { headers: NO_STORE });
+    const state = readNoteState(locals.user.uuid);
+    if (
+        state.state !== 'absent' &&
+        state.keyring.credentialId !== locals.user.passkey.credentialId
+    ) {
+        return json({ error: 'credential_mismatch' }, { status: 409, headers: NO_STORE });
+    }
+    return json(state, { headers: NO_STORE });
 };
 
 export const PUT: RequestHandler = async ({ locals, request }) => {

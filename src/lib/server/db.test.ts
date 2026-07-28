@@ -89,11 +89,21 @@ describe('note database', () => {
             ok: true,
             revision: 2
         });
+        expect(saveNote(UUID, CREDENTIAL, next, 1, handle)).toEqual({
+            ok: true,
+            revision: 2
+        });
         const stale = saveNote(UUID, CREDENTIAL, ciphertext, 1, handle);
         expect(stale).toEqual({
             ok: false,
             reason: 'conflict',
             current: { ciphertext: next, revision: 2 }
+        });
+
+        const afterDiscard = { ...ciphertext, ct: 'F'.repeat(22) };
+        expect(saveNote(UUID, CREDENTIAL, afterDiscard, 2, handle)).toEqual({
+            ok: true,
+            revision: 3
         });
     });
 });
