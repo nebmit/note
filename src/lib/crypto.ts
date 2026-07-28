@@ -159,12 +159,14 @@ export function webauthnSupported(): boolean {
  */
 export async function runPrfCeremony(
     passkey: SsoPasskey,
-    prfInput: string
+    prfInput: string,
+    signal?: AbortSignal
 ): Promise<Uint8Array> {
     if (!webauthnSupported()) throw new WebAuthnUnavailableError();
 
     const input = fromBase64url(prfInput, SETUP_BYTES);
     const credential = (await navigator.credentials.get({
+        signal,
         publicKey: {
             challenge: crypto.getRandomValues(new Uint8Array(32)),
             rpId: passkey.rpId,

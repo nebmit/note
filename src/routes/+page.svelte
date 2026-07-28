@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { onMount } from "svelte";
     import {
         CredentialMismatchError,
         PrfUnavailableError,
@@ -12,19 +12,28 @@
         runPrfCeremony,
         unwrapDek,
         webauthnSupported,
-        wrapDek
-    } from '$lib/crypto';
-    import type {
-        KeyringMetadata,
-        NoteApiState
-    } from '$lib/types';
-    import Login from './login.svelte';
-    import Note from './note.svelte';
-    import { logStore } from './store';
-    import type { PageData } from './$types';
+        wrapDek,
+    } from "$lib/crypto";
+    import type { KeyringMetadata, NoteApiState } from "$lib/types";
+    import Login from "./login.svelte";
+    import Note from "./note.svelte";
+    import Notice from "./notice.svelte";
+    import { logStore } from "./store";
+    import type { PageData } from "./$types";
 
-    type LockedState = Exclude<NoteApiState, { state: 'absent' }>;
-    type Phase = 'preparing' | 'locked' | 'unlocking' | 'ready' | 'unsupported' | 'error';
+    type LockedState = Exclude<NoteApiState, { state: "absent" }>;
+    type Phase =
+        | "preparing"
+        | "locked"
+        | "unlocking"
+        | "ready"
+        | "unsupported"
+        | "error";
+
+    interface Failure {
+        kind: "session" | "credential" | "unsupported" | "generic" | "canceled";
+        message: string;
+    }
 
     interface UnlockedNote {
         dek: CryptoKey;
@@ -35,10 +44,21 @@
 
     let { data }: { data: PageData } = $props();
 
-    let phase = $state<Phase>('preparing');
-    let errorMessage = $state('');
+    let phase = $state<Phase>("preparing");
+    let failure = $state<Failure | null>(null);
     let prepared = $state<LockedState | null>(null);
     let unlocked = $state<UnlockedNote | null>(null);
+
+    let ceremony: AbortController | null = null;
+
+    const loginPhase = $derived(
+        phase === "preparing" || phase === "unlocking" ? phase : "locked",
+    );
+    const storedRevision = $derived(
+        prepared !== null && prepared.state === "ready"
+            ? prepared.note.revision
+            : null,
+    );
 
     function elapsed(start: number): string {
         return `${Math.round(performance.now() - start).toLocaleString()} ms`;
@@ -48,7 +68,7 @@
         const body = await response.json().catch(() => null);
         if (!response.ok) {
             const code =
-                typeof body?.error === 'string'
+                typeof body?.error === "string"
                     ? body.error
                     : `request_failed_${response.status}`;
             throw new Error(code);
@@ -67,79 +87,111 @@
     }
 
     async function prepare(): Promise<void> {
-        errorMessage = '';
+        failure = null;
         unlocked = null;
         prepared = null;
 
         if (data.user === null) {
-            phase = 'locked';
+            phase = "locked";
             return;
         }
         if (data.user.passkey === null) {
-            phase = 'unsupported';
-            errorMessage = 'This SSO account does not have exactly one passkey.';
+            phase = "unsupported";
+            failure = {
+                kind: "unsupported",
+                message: "This SSO account does not have exactly one passkey.",
+            };
             return;
         }
         if (!webauthnSupported()) {
-            phase = 'unsupported';
-            errorMessage = 'This browser does not support WebAuthn.';
+            phase = "unsupported";
+            failure = {
+                kind: "unsupported",
+                message: "This browser does not support WebAuthn.",
+            };
             return;
         }
 
-        phase = 'preparing';
+        phase = "preparing";
         logStore.clear();
-        logStore.add('fetching encrypted note metadata');
+        logStore.add("fetching encrypted note metadata");
         try {
-            const response = await fetch('/api/note', {
-                headers: { accept: 'application/json' }
+            const response = await fetch("/api/note", {
+                headers: { accept: "application/json" },
             });
             let state = await readJson<NoteApiState>(response);
-            if (state.state === 'absent') {
-                logStore.add('reserving random, public key-derivation inputs');
+            if (state.state === "absent") {
+                logStore.add("reserving random, public key-derivation inputs");
                 const setup = createSetupInputs();
                 state = await readJson<NoteApiState>(
-                    await fetch('/api/note/reserve', {
-                        method: 'POST',
+                    await fetch("/api/note/reserve", {
+                        method: "POST",
                         headers: {
-                            accept: 'application/json',
-                            'content-type': 'application/json'
+                            accept: "application/json",
+                            "content-type": "application/json",
                         },
-                        body: JSON.stringify(setup)
-                    })
+                        body: JSON.stringify(setup),
+                    }),
                 );
             }
-            if (state.state === 'absent') throw new Error('keyring_reservation_failed');
+            if (state.state === "absent")
+                throw new Error("keyring_reservation_failed");
             verifyCredential(state);
             prepared = state;
-            phase = 'locked';
-            logStore.add('encrypted note metadata ready; waiting for passkey verification');
+            phase = "locked";
+            logStore.add(
+                "encrypted note metadata ready; waiting for passkey verification",
+            );
         } catch (error) {
-            console.error('note preparation failed', error);
-            phase = 'error';
-            errorMessage =
-                error instanceof Error && error.message === 'unauthorized'
-                    ? 'Your SSO session expired. Sign in again.'
-                    : 'Could not prepare the encrypted note.';
+            if (error instanceof CredentialMismatchError) {
+                phase = "error";
+                failure = { kind: "credential", message: error.message };
+                logStore.add(
+                    "ERROR: SSO credential does not match the encrypted keyring",
+                );
+                return;
+            }
+            console.error("note preparation failed", error);
+            phase = "error";
+            failure =
+                error instanceof Error && error.message === "unauthorized"
+                    ? { kind: "session", message: "Your SSO session expired." }
+                    : {
+                          kind: "generic",
+                          message: "Could not prepare the encrypted note.",
+                      };
         }
     }
 
     async function unlock(): Promise<void> {
         const user = data.user;
         const state = prepared;
-        if (user?.passkey === null || user === null || state === null || phase === 'unlocking') {
+        if (
+            user?.passkey === null ||
+            user === null ||
+            state === null ||
+            phase === "unlocking"
+        ) {
             return;
         }
 
-        phase = 'unlocking';
-        errorMessage = '';
-        logStore.add('requesting user-verified WebAuthn PRF output');
+        phase = "unlocking";
+        failure = null;
+        logStore.add("requesting user-verified WebAuthn PRF output");
 
         try {
             const ceremonyStarted = performance.now();
+            ceremony = new AbortController();
             // Keep this as the first awaited operation: browsers receive the
             // WebAuthn request directly from the button's user gesture.
-            const prfOutput = await runPrfCeremony(user.passkey, state.keyring.prfInput);
-            logStore.add(`passkey verification completed in ${elapsed(ceremonyStarted)}`);
+            const prfOutput = await runPrfCeremony(
+                user.passkey,
+                state.keyring.prfInput,
+                ceremony.signal,
+            );
+            logStore.add(
+                `passkey verification completed in ${elapsed(ceremonyStarted)}`,
+            );
 
             const derivationStarted = performance.now();
             let kek: CryptoKey;
@@ -149,33 +201,51 @@
                 prfOutput.fill(0);
             }
             logStore.add(
-                `derived non-extractable AES-256-GCM key-encryption key with HKDF-SHA256 in ${elapsed(derivationStarted)}`
+                `derived non-extractable AES-256-GCM key-encryption key with HKDF-SHA256 in ${elapsed(derivationStarted)}`,
             );
 
             let authoritative: NoteApiState;
-            if (state.state === 'pending') {
-                logStore.add('generating and wrapping a random AES-256-GCM note key');
+            if (state.state === "pending") {
+                logStore.add(
+                    "generating and wrapping a random AES-256-GCM note key",
+                );
                 const freshDek = await generateDek();
-                const wrappedDek = await wrapDek(freshDek, kek, state.keyring, user.uuid);
+                const wrappedDek = await wrapDek(
+                    freshDek,
+                    kek,
+                    state.keyring,
+                    user.uuid,
+                );
                 // Immediately move normal use to a non-extractable handle.
-                const workingDek = await unwrapDek(wrappedDek, kek, state.keyring, user.uuid);
-                const ciphertext = await encryptNote('', workingDek, state.keyring, user.uuid, 1);
+                const workingDek = await unwrapDek(
+                    wrappedDek,
+                    kek,
+                    state.keyring,
+                    user.uuid,
+                );
+                const ciphertext = await encryptNote(
+                    "",
+                    workingDek,
+                    state.keyring,
+                    user.uuid,
+                    1,
+                );
                 authoritative = await readJson<NoteApiState>(
-                    await fetch('/api/note/initialize', {
-                        method: 'POST',
+                    await fetch("/api/note/initialize", {
+                        method: "POST",
                         headers: {
-                            accept: 'application/json',
-                            'content-type': 'application/json'
+                            accept: "application/json",
+                            "content-type": "application/json",
                         },
-                        body: JSON.stringify({ wrappedDek, ciphertext })
-                    })
+                        body: JSON.stringify({ wrappedDek, ciphertext }),
+                    }),
                 );
             } else {
                 authoritative = state;
             }
 
-            if (authoritative.state !== 'ready') {
-                throw new Error('keyring_initialization_failed');
+            if (authoritative.state !== "ready") {
+                throw new Error("keyring_initialization_failed");
             }
             verifyCredential(authoritative);
 
@@ -184,17 +254,17 @@
                 authoritative.keyring.wrappedDek,
                 kek,
                 authoritative.keyring,
-                user.uuid
+                user.uuid,
             );
             const content = await decryptNote(
                 authoritative.note.ciphertext,
                 dek,
                 authoritative.keyring,
                 user.uuid,
-                authoritative.note.revision
+                authoritative.note.revision,
             );
             logStore.add(
-                `authenticated and decrypted note locally in ${elapsed(decryptStarted)}`
+                `authenticated and decrypted note locally in ${elapsed(decryptStarted)}`,
             );
 
             prepared = authoritative;
@@ -202,47 +272,81 @@
                 dek,
                 metadata: authoritative.keyring,
                 content,
-                revision: authoritative.note.revision
+                revision: authoritative.note.revision,
             };
-            phase = 'ready';
+            phase = "ready";
         } catch (error) {
-            if (error instanceof DOMException && error.name === 'NotAllowedError') {
-                phase = 'locked';
-                errorMessage = 'Passkey verification was canceled.';
-                logStore.add('passkey verification canceled');
+            if (
+                error instanceof DOMException &&
+                (error.name === "NotAllowedError" ||
+                    error.name === "AbortError")
+            ) {
+                phase = "locked";
+                failure = {
+                    kind: "canceled",
+                    message: "Passkey verification was canceled.",
+                };
+                logStore.add("passkey verification canceled");
                 return;
             }
             if (
                 error instanceof PrfUnavailableError ||
                 error instanceof WebAuthnUnavailableError
             ) {
-                phase = 'unsupported';
-                errorMessage =
-                    'This passkey/browser combination does not provide WebAuthn PRF.';
-                logStore.add('ERROR: WebAuthn PRF unavailable; no fallback is permitted');
+                phase = "unsupported";
+                failure = {
+                    kind: "unsupported",
+                    message:
+                        "This passkey and browser combination does not provide WebAuthn PRF.",
+                };
+                logStore.add(
+                    "ERROR: WebAuthn PRF unavailable; no fallback is permitted",
+                );
                 return;
             }
             if (error instanceof CredentialMismatchError) {
-                phase = 'error';
-                errorMessage = error.message;
-                logStore.add('ERROR: SSO credential does not match the encrypted keyring');
+                phase = "error";
+                failure = { kind: "credential", message: error.message };
+                logStore.add(
+                    "ERROR: SSO credential does not match the encrypted keyring",
+                );
                 return;
             }
-            console.error('note unlock failed', error);
-            phase = 'error';
-            errorMessage =
-                error instanceof DOMException && error.name === 'OperationError'
-                    ? 'The encrypted note or wrapped key failed authentication.'
-                    : 'Could not unlock the encrypted note.';
-            logStore.add('ERROR: note unlock failed closed');
+            if (error instanceof Error && error.message === "unauthorized") {
+                phase = "error";
+                failure = {
+                    kind: "session",
+                    message: "Your SSO session expired.",
+                };
+                logStore.add("ERROR: SSO session expired during unlock");
+                return;
+            }
+            console.error("note unlock failed", error);
+            phase = "error";
+            failure = {
+                kind: "generic",
+                message:
+                    error instanceof DOMException &&
+                    error.name === "OperationError"
+                        ? "The encrypted note or wrapped key failed authentication."
+                        : "Could not unlock the encrypted note.",
+            };
+            logStore.add("ERROR: note unlock failed closed");
+        } finally {
+            ceremony = null;
         }
+    }
+
+    /** Dismisses the browser's passkey sheet; `unlock()` lands on AbortError. */
+    function cancelUnlock(): void {
+        ceremony?.abort();
     }
 
     function lock(): void {
         unlocked = null;
-        phase = 'locked';
-        errorMessage = '';
-        logStore.add('discarded plaintext and in-memory key handles');
+        phase = "locked";
+        failure = null;
+        logStore.add("discarded plaintext and in-memory key handles");
     }
 
     onMount(() => {
@@ -257,7 +361,7 @@
     <title>Note | TBW</title>
 </svelte:head>
 
-{#if phase === 'ready' && unlocked !== null && data.user !== null}
+{#if phase === "ready" && unlocked !== null && data.user !== null}
     <Note
         uuid={data.user.uuid}
         signOutUrl={data.signOutUrl}
@@ -267,12 +371,23 @@
         dek={unlocked.dek}
         onLock={lock}
     />
+{:else if failure !== null && (failure.kind === "session" || failure.kind === "credential" || failure.kind === "unsupported")}
+    <Notice
+        kind={failure.kind}
+        detail={failure.message}
+        revision={storedRevision}
+        signInUrl={data.signInUrl}
+        signOutUrl={data.signOutUrl}
+    />
 {:else}
     <Login
         user={data.user}
         signInUrl={data.signInUrl}
-        {phase}
-        error={errorMessage}
+        signOutUrl={data.signOutUrl}
+        phase={loginPhase}
+        error={failure?.message ?? ""}
+        retry={failure?.kind === "generic"}
         action={prepared === null ? prepare : unlock}
+        onCancel={cancelUnlock}
     />
 {/if}

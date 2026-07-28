@@ -1,190 +1,198 @@
 <script lang="ts">
-    import { cubicOut, cubicIn } from "svelte/easing";
-    import { draw, fade } from "svelte/transition";
-
     let {
         width = "400",
-        stroke = "#ffffff",
+        stroke = "#F6F2EF",
         accentColor = "#EB1C76",
+        variant = "full",
+        strokeWidth,
+        animate = false,
     }: {
         width?: string;
+        /** Ink for the four plain strokes and the three plain nodes. */
         stroke?: string;
         accentColor?: string;
+        /** `mark` drops the five nodes so the constellation survives at 22–26px. */
+        variant?: "full" | "mark";
+        strokeWidth?: number;
+        animate?: boolean;
     } = $props();
 
-    const points_stage_0 = { delay: 100, duration: 1400 };
-    const reverse_points_stage_2 = { delay: 2000 };
-
-    const points_stage_1 = { delay: 1600 };
-    const reverse_points_stage_1 = { delay: 1000 };
-
-    const lines_stage_1 = { delay: 1500, easing: cubicOut };
-    const reverse_lines_stage_1 = { delay: 1000, easing: cubicIn };
-
-    const lines_stage_2 = { delay: 2000, duration: 2000, easing: cubicOut };
-    const reverse_lines_stage_0 = { delay: 100, duration: 1000, easing: cubicIn };
+    const lineWidth = $derived(strokeWidth ?? (variant === "mark" ? 40 : 26));
+    const drawn = $derived(animate && variant === "full");
+    // Only meaningful while drawing: each magenta stroke is rendered twice with
+    // its endpoints swapped so the pair draws in from both ends at once.
+    const dash = $derived(drawn ? 620 : undefined);
 </script>
 
-<svg {stroke} {width} viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
-    <g>
-        <!-- Left Top -->
-        <line
-            in:draw={lines_stage_2}
-            out:draw={reverse_lines_stage_0}
-            stroke={accentColor}
-            stroke-linecap="round"
-            stroke-width="26"
-            y1="112.5"
-            x1="292.5"
-            y2="200"
-            x2="100"
-            fill="none"
-        />
+<svg
+    {stroke}
+    {width}
+    viewBox="0 0 800 600"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+>
+    <g fill="none" stroke-width={lineWidth} stroke-linecap="round" class:anim={drawn}>
+        {#if variant === "full"}
+            <!-- Middle — the centre node lands alone, ahead of everything else. -->
+            <ellipse
+                class="node-centre"
+                stroke={accentColor}
+                ry="7"
+                rx="7"
+                cy="420"
+                cx="400"
+                stroke-width="14"
+            />
+        {/if}
+
         <!-- Left Bottom -->
         <line
-            in:draw={lines_stage_1}
-            out:draw={reverse_lines_stage_1}
-            stroke-linecap="round"
-            stroke-width="26"
+            class="line-plain"
             y1="400"
             x1="360"
             y2="245"
             x2="100"
-            fill="none"
+            pathLength={dash}
+            stroke-dasharray={dash}
         />
         <!-- Middle -->
         <line
-            in:draw={lines_stage_1}
-            out:draw={reverse_lines_stage_1}
-            stroke-linecap="round"
-            stroke-width="26"
+            class="line-plain"
             y1="380"
             x1="395"
             y2="135"
             x2="340"
-            fill="none"
+            pathLength={dash}
+            stroke-dasharray={dash}
         />
         <!-- Right Top -->
         <line
-            in:draw={lines_stage_1}
-            out:draw={reverse_lines_stage_1}
-            stroke-linecap="round"
-            stroke-width="26"
+            class="line-plain"
             y1="405"
             x1="440"
             y2="340"
             x2="625"
-            fill="none"
-        />
-        <!-- Right Middle -->
-        <line
-            in:draw={lines_stage_2}
-            out:draw={reverse_lines_stage_0}
-            stroke={accentColor}
-            stroke-linecap="round"
-            stroke-width="26"
-            y1="485"
-            x1="605"
-            y2="370"
-            x2="655"
-            fill="none"
+            pathLength={dash}
+            stroke-dasharray={dash}
         />
         <!-- Right Bottom -->
         <line
-            in:draw={lines_stage_1}
-            out:draw={reverse_lines_stage_1}
-            stroke-linecap="round"
-            stroke-width="26"
+            class="line-plain"
             y1="440"
             x1="440"
             y2="505"
             x2="555"
-            fill="none"
+            pathLength={dash}
+            stroke-dasharray={dash}
         />
 
-        <!-- Left Top Mirror -->
-        <line
-            in:draw={lines_stage_2}
-            out:draw={reverse_lines_stage_0}
-            stroke={accentColor}
-            stroke-linecap="round"
-            stroke-width="26"
-            y2="112.5"
-            x2="292.5"
-            y1="200"
-            x1="100"
-            fill="none"
-        />
-        <!-- Right Middle Mirror -->
-        <line
-            in:draw={lines_stage_2}
-            out:draw={reverse_lines_stage_0}
-            stroke={accentColor}
-            stroke-linecap="round"
-            stroke-width="26"
-            y2="485"
-            x2="605"
-            y1="370"
-            x1="655"
-            fill="none"
-        />
+        {#if variant === "full"}
+            <!-- Left Top -->
+            <ellipse
+                class="node-outer"
+                ry="7"
+                rx="7"
+                cy="100"
+                cx="330"
+                stroke-width="14"
+            />
+            <!-- Left Bottom -->
+            <ellipse
+                class="node-outer"
+                stroke={accentColor}
+                ry="7"
+                rx="7"
+                cy="220"
+                cx="65"
+                stroke-width="14"
+            />
+            <!-- Right Top -->
+            <ellipse
+                class="node-outer"
+                ry="7"
+                rx="7"
+                cy="330"
+                cx="670"
+                stroke-width="14"
+            />
+            <!-- Right Bottom -->
+            <ellipse
+                class="node-outer"
+                ry="7"
+                rx="7"
+                cy="520"
+                cx="590"
+                stroke-width="14"
+            />
+        {/if}
 
         <!-- Left Top -->
-        <ellipse
-            in:fade={points_stage_1}
-            out:fade={reverse_points_stage_1}
-            ry="7"
-            rx="7"
-            cy="100"
-            cx="330"
-            stroke-width="14"
-            fill="none"
-        />
-        <!-- Left Bottom -->
-        <ellipse
-            in:fade={points_stage_1}
-            out:fade={reverse_points_stage_1}
+        <line
+            class="line-accent"
             stroke={accentColor}
-            ry="7"
-            rx="7"
-            cy="220"
-            cx="65"
-            stroke-width="14"
-            fill="none"
+            y1="112.5"
+            x1="292.5"
+            y2="200"
+            x2="100"
+            pathLength={dash}
+            stroke-dasharray={dash}
         />
-        <!-- Middle -->
-        <ellipse
-            in:fade={points_stage_0}
-            out:fade={reverse_points_stage_2}
+        <!-- Right Middle -->
+        <line
+            class="line-accent"
             stroke={accentColor}
-            ry="7"
-            rx="7"
-            cy="420"
-            cx="400"
-            stroke-width="14"
-            fill="none"
+            y1="485"
+            x1="605"
+            y2="370"
+            x2="655"
+            pathLength={dash}
+            stroke-dasharray={dash}
         />
-        <!-- Right Top -->
-        <ellipse
-            in:fade={points_stage_1}
-            out:fade={reverse_points_stage_1}
-            ry="7"
-            rx="7"
-            cy="330"
-            cx="670"
-            stroke-width="14"
-            fill="none"
-        />
-        <!-- Right Bottom -->
-        <ellipse
-            in:fade={points_stage_1}
-            out:fade={reverse_points_stage_1}
-            ry="7"
-            rx="7"
-            cy="520"
-            cx="590"
-            stroke-width="14"
-            fill="none"
-        />
+
+        {#if drawn}
+            <!-- Left Top, mirrored -->
+            <line
+                class="line-accent"
+                stroke={accentColor}
+                y2="112.5"
+                x2="292.5"
+                y1="200"
+                x1="100"
+                pathLength={dash}
+                stroke-dasharray={dash}
+            />
+            <!-- Right Middle, mirrored -->
+            <line
+                class="line-accent"
+                stroke={accentColor}
+                y2="485"
+                x2="605"
+                y1="370"
+                x1="655"
+                pathLength={dash}
+                stroke-dasharray={dash}
+            />
+        {/if}
     </g>
 </svg>
+
+<style>
+    /* Entry sequence, 1040ms end to end, in the original staging order:
+       centre node, plain lines, remaining nodes, magenta pair. Keyframes are
+       global (app.css); prefers-reduced-motion collapses all of it there. */
+    .anim .node-centre {
+        animation: noteFade 420ms 0ms ease-out both;
+    }
+
+    .anim .line-plain {
+        animation: noteDraw 400ms 360ms cubic-bezier(0.33, 1, 0.68, 1) both;
+    }
+
+    .anim .node-outer {
+        animation: noteFade 260ms 520ms ease-out both;
+    }
+
+    .anim .line-accent {
+        animation: noteDraw 440ms 600ms cubic-bezier(0.33, 1, 0.68, 1) both;
+    }
+</style>
