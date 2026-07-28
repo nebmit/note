@@ -2,11 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
     decryptNote,
     deriveKek,
+    deriveKekFingerprint,
     encryptNote,
+    envelopeFingerprint,
     fromBase64url,
     generateDek,
+    kekInfoText,
+    noteAadText,
     toBase64url,
     unwrapDek,
+    wrapAadText,
     wrapDek
 } from './crypto';
 import type { AesGcmEnvelope, KeyringMetadata } from './types';
@@ -100,5 +105,71 @@ describe('passkey-derived envelope encryption', () => {
         await expect(unwrapDek(malformed, kek, metadata(), UUID)).rejects.toThrow(
             /Expected 12 bytes/
         );
+    });
+
+    it('binds the documented context strings, unchanged', () => {
+        // These strings are the AAD. Editing one silently orphans every stored
+        // note, so they are pinned here rather than left to a refactor.
+        expect(kekInfoText(UUID, metadata())).toBe(
+            `["note.timben.net","key-encryption-key",1,"${UUID}","${CREDENTIAL_ID}"]`
+        );
+        expect(wrapAadText(UUID, metadata())).toBe(
+            `["note.timben.net","dek-wrap",1,"${UUID}","${CREDENTIAL_ID}","${bytes(7)}"]`
+        );
+        expect(noteAadText(UUID, metadata(), 4)).toBe(
+            `["note.timben.net","note",1,"${UUID}","${CREDENTIAL_ID}","${bytes(7)}",4]`
+        );
+    });
+});
+
+describe('display-only fingerprints', () => {
+    it('is stable for one account and separates salt, credential and uuid', async () => {
+        const prf = new Uint8Array(32).fill(3);
+        const base = await deriveKekFingerprint(prf, metadata(), UUID);
+
+        expect(base).toMatch(/^[0-9a-f]{8}$/);
+        expect(await deriveKekFingerprint(prf, metadata(), UUID)).toBe(base);
+        expect(
+            await deriveKekFingerprint(prf, metadata({ hkdfSalt: bytes(9) }), UUID)
+        ).not.toBe(base);
+        expect(
+            await deriveKekFingerprint(
+                prf,
+                metadata({ credentialId: toBase64url(new Uint8Array([9, 9])) }),
+                UUID
+            )
+        ).not.toBe(base);
+        expect(await deriveKekFingerprint(prf, metadata(), `${UUID}-other`)).not.toBe(base);
+        expect(
+            await deriveKekFingerprint(new Uint8Array(32).fill(4), metadata(), UUID)
+        ).not.toBe(base);
+    });
+
+    it('rejects PRF output of the wrong length', async () => {
+        await expect(
+            deriveKekFingerprint(new Uint8Array(16), metadata(), UUID)
+        ).rejects.toThrow(/Invalid PRF output length/);
+    });
+
+    it('does not disturb the key it labels', async () => {
+        const prf = new Uint8Array(32).fill(5);
+        const kek = await deriveKek(prf, metadata(), UUID);
+        const wrapped = await wrapDek(await generateDek(), kek, metadata(), UUID);
+        await deriveKekFingerprint(prf, metadata(), UUID);
+
+        const later = await deriveKek(prf, metadata(), UUID);
+        await expect(unwrapDek(wrapped, later, metadata(), UUID)).resolves.toBeDefined();
+    });
+
+    it('identifies an envelope without touching a key', async () => {
+        const kek = await deriveKek(new Uint8Array(32).fill(6), metadata(), UUID);
+        const wrapped = await wrapDek(await generateDek(), kek, metadata(), UUID);
+        const other = await wrapDek(await generateDek(), kek, metadata(), UUID);
+
+        const print = await envelopeFingerprint(wrapped);
+        expect(print).toMatch(/^[0-9a-f]{8}$/);
+        expect(await envelopeFingerprint(wrapped)).toBe(print);
+        expect(await envelopeFingerprint(other)).not.toBe(print);
+        expect(await envelopeFingerprint(tamper(wrapped))).not.toBe(print);
     });
 });

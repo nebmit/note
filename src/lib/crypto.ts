@@ -21,6 +21,8 @@ export const MAX_PLAINTEXT_BYTES = 1_000_000;
 
 const KEY_BITS = 256;
 const GCM_TAG_BITS = 128;
+/** Display-only key-check values; short enough to read, long enough to differ. */
+const FINGERPRINT_BYTES = 4;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -79,11 +81,11 @@ export function createSetupInputs(): { prfInput: string; hkdfSalt: string } {
     };
 }
 
-function context(parts: Array<string | number>): Uint8Array {
-    return encoder.encode(JSON.stringify(parts));
+function context(parts: Array<string | number>): string {
+    return JSON.stringify(parts);
 }
 
-function kekInfo(uuid: string, metadata: KeyringMetadata): Uint8Array {
+export function kekInfoText(uuid: string, metadata: KeyringMetadata): string {
     return context([
         'note.timben.net',
         'key-encryption-key',
@@ -93,7 +95,7 @@ function kekInfo(uuid: string, metadata: KeyringMetadata): Uint8Array {
     ]);
 }
 
-function wrapAad(uuid: string, metadata: KeyringMetadata): Uint8Array {
+export function wrapAadText(uuid: string, metadata: KeyringMetadata): string {
     return context([
         'note.timben.net',
         'dek-wrap',
@@ -104,7 +106,7 @@ function wrapAad(uuid: string, metadata: KeyringMetadata): Uint8Array {
     ]);
 }
 
-function noteAad(uuid: string, metadata: KeyringMetadata, revision: number): Uint8Array {
+export function noteAadText(uuid: string, metadata: KeyringMetadata, revision: number): string {
     return context([
         'note.timben.net',
         'note',
@@ -114,6 +116,18 @@ function noteAad(uuid: string, metadata: KeyringMetadata, revision: number): Uin
         metadata.prfInput,
         revision
     ]);
+}
+
+function kekInfo(uuid: string, metadata: KeyringMetadata): Uint8Array {
+    return encoder.encode(kekInfoText(uuid, metadata));
+}
+
+function wrapAad(uuid: string, metadata: KeyringMetadata): Uint8Array {
+    return encoder.encode(wrapAadText(uuid, metadata));
+}
+
+function noteAad(uuid: string, metadata: KeyringMetadata, revision: number): Uint8Array {
+    return encoder.encode(noteAadText(uuid, metadata, revision));
 }
 
 function gcmParams(iv: Uint8Array, additionalData: Uint8Array): AesGcmParams {
@@ -229,6 +243,56 @@ export async function deriveKek(
         false,
         ['wrapKey', 'unwrapKey']
     );
+}
+
+function toHex(bytes: Uint8Array): string {
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+
+export async function deriveKekFingerprint(
+    prfOutput: Uint8Array,
+    metadata: KeyringMetadata,
+    uuid: string
+): Promise<string> {
+    if (prfOutput.length !== PRF_OUTPUT_BYTES) {
+        throw new Error('Invalid PRF output length');
+    }
+    const material = await crypto.subtle.importKey(
+        'raw',
+        prfOutput as Uint8Array<ArrayBuffer>,
+        'HKDF',
+        false,
+        ['deriveBits']
+    );
+    const bits = await crypto.subtle.deriveBits(
+        {
+            name: 'HKDF',
+            hash: 'SHA-256',
+            salt: fromBase64url(metadata.hkdfSalt, SETUP_BYTES) as Uint8Array<ArrayBuffer>,
+            info: encoder.encode(
+                context([
+                    'note.timben.net',
+                    'kek-fingerprint',
+                    CRYPTO_VERSION,
+                    uuid,
+                    metadata.credentialId
+                ])
+            ) as Uint8Array<ArrayBuffer>
+        },
+        material,
+        FINGERPRINT_BYTES * 8
+    );
+    return toHex(new Uint8Array(bits));
+}
+
+/** Identifies a stored envelope by hashing it — no key access involved. */
+export async function envelopeFingerprint(envelope: AesGcmEnvelope): Promise<string> {
+    const digest = await crypto.subtle.digest(
+        'SHA-256',
+        encoder.encode(`${envelope.iv}.${envelope.ct}`) as Uint8Array<ArrayBuffer>
+    );
+    return toHex(new Uint8Array(digest, 0, FINGERPRINT_BYTES));
 }
 
 /** The temporary extractable DEK exists only long enough to wrap it. */

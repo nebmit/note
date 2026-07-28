@@ -1,11 +1,12 @@
 <script lang="ts">
     import { onDestroy, onMount } from 'svelte';
-    import { encryptNote } from '$lib/crypto';
+    import { encryptNote, noteAadText } from '$lib/crypto';
     import type { KeyringMetadata } from '$lib/types';
-    import { ago, shortUuid } from './format';
+    import { abbreviate, ago, base64urlBytes, byteCount, shortUuid } from './format';
     import Logo from './logo.svelte';
+    import { createNowTicker } from './now.svelte';
     import SecurityLog from './securitylog.svelte';
-    import { logStore } from './store';
+    import { fact, logStore, masked } from './store';
 
     let {
         uuid,
@@ -56,7 +57,7 @@
     let lastSavedAt = $state<number | null>(null);
     let savedTicks = $state(0);
     let copied = $state<'ok' | 'failed' | null>(null);
-    let now = $state(Date.now());
+    const now = createNowTicker();
 
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
     let slowSaveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -121,14 +122,8 @@
         }
     });
 
-    function elapsed(start: number): string {
-        return `${Math.round(performance.now() - start).toLocaleString()} ms`;
-    }
-
     onMount(() => {
         document.getElementById('textarea')?.focus();
-        const tick = setInterval(() => (now = Date.now()), 5_000);
-        return () => clearInterval(tick);
     });
 
     onDestroy(() => {
@@ -168,17 +163,28 @@
                 uuid,
                 nextRevision
             );
-            logStore.add(
-                `encrypted revision ${nextRevision.toLocaleString()} locally with a fresh AES-GCM iv in ${elapsed(started)}`
-            );
+            logStore.add(`encrypted revision ${nextRevision.toLocaleString()} locally`, {
+                durationMs: performance.now() - started,
+                details: [
+                    fact('plaintext', `${snapshot.length.toLocaleString()} chars`),
+                    fact('ciphertext', byteCount(base64urlBytes(ciphertext.ct))),
+                    masked('iv', ciphertext.iv),
+                    masked('ct', abbreviate(ciphertext.ct)),
+                    masked('aad', noteAadText(uuid, metadata, nextRevision))
+                ]
+            });
         } catch (error) {
             console.error('note encryption failed', error);
             clearSlowSave();
             savestate = 'error';
-            logStore.add('ERROR: local note encryption failed');
+            logStore.add('local note encryption failed', {
+                level: 'error',
+                details: [fact('cause', error instanceof Error ? error.message : 'unknown')]
+            });
             return false;
         }
 
+        const sentAt = performance.now();
         try {
             const response = await fetch('/api/note', {
                 method: 'PUT',
@@ -194,9 +200,21 @@
             if (response.status === 409 && body?.error === 'conflict') {
                 conflict = true;
                 savestate = 'conflict';
-                logStore.add(
-                    `ERROR: revision conflict; refusing to overwrite revision ${body.current?.revision ?? 'unknown'}`
-                );
+                // Server-supplied and unvalidated: keep it out of the message.
+                const winning = Number(body.current?.revision);
+                logStore.add('revision conflict; refusing to overwrite', {
+                    level: 'error',
+                    durationMs: performance.now() - sentAt,
+                    details: [
+                        fact('sent', nextRevision.toLocaleString()),
+                        fact(
+                            'stored',
+                            Number.isSafeInteger(winning)
+                                ? winning.toLocaleString()
+                                : 'unknown'
+                        )
+                    ]
+                });
                 return false;
             }
             if (response.status === 409 && body?.error === 'credential_mismatch') {
@@ -205,7 +223,10 @@
                     title: "This passkey no longer opens this note",
                     body: 'The SSO passkey stopped matching the encrypted keyring, so editing is disabled to prevent an unsafe overwrite. Copy anything you need before signing out.'
                 };
-                logStore.add('ERROR: SSO credential no longer matches the keyring');
+                logStore.add('SSO credential no longer matches the keyring', {
+                    level: 'error',
+                    details: [masked('credential id', metadata.credentialId)]
+                });
                 return false;
             }
             if (!response.ok || typeof body?.revision !== 'number') {
@@ -215,27 +236,50 @@
                         title: 'Your sign-in lapsed',
                         body: 'The note could not be saved because the SSO session expired. Your text is still here — copy anything you want to keep, then sign in again.'
                     };
-                    logStore.add('ERROR: SSO session expired before save');
+                    logStore.add('SSO session expired before save', { level: 'error' });
                 } else {
                     savestate = 'error';
-                    logStore.add(`ERROR: encrypted save failed (${response.status})`);
+                    logStore.add('encrypted save failed', {
+                        level: 'error',
+                        durationMs: performance.now() - sentAt,
+                        details: [
+                            fact('status', String(response.status)),
+                            fact(
+                                'code',
+                                typeof body?.error === 'string'
+                                    ? abbreviate(body.error)
+                                    : 'none'
+                            )
+                        ]
+                    });
                 }
                 return false;
             }
 
             revision = body.revision;
             lastSavedAt = Date.now();
-            now = lastSavedAt;
             savedTicks += 1;
             dirty = content !== snapshot;
             savestate = dirty ? 'editing' : 'saved';
-            logStore.add(`stored encrypted revision ${revision.toLocaleString()}`);
+            logStore.add('stored the envelope', {
+                durationMs: performance.now() - sentAt,
+                details: [
+                    fact(
+                        'revision',
+                        `${baseRevision.toLocaleString()} → ${revision.toLocaleString()}`
+                    )
+                ]
+            });
             return true;
         } catch (error) {
             console.error('note save failed', error);
             clearSlowSave();
             savestate = 'offline';
-            logStore.add('ERROR: could not reach the server');
+            logStore.add('could not reach the server', {
+                level: 'error',
+                durationMs: performance.now() - sentAt,
+                details: [fact('cause', error instanceof Error ? error.message : 'unknown')]
+            });
             return false;
         }
     }
@@ -523,7 +567,7 @@
                     {#if lastSavedAt === null}
                         nothing stored from this session yet
                     {:else}
-                        last stored revision {revision.toLocaleString()} · {ago(lastSavedAt, now)}
+                        last stored revision {revision.toLocaleString()} · {ago(lastSavedAt, now.value)}
                     {/if}
                 </span>
             </div>

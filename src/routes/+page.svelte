@@ -2,23 +2,31 @@
     import { onMount } from "svelte";
     import {
         CredentialMismatchError,
+        PRF_OUTPUT_BYTES,
         PrfUnavailableError,
+        SETUP_BYTES,
         WebAuthnUnavailableError,
         createSetupInputs,
         decryptNote,
         deriveKek,
+        deriveKekFingerprint,
         encryptNote,
+        envelopeFingerprint,
         generateDek,
+        kekInfoText,
+        noteAadText,
         runPrfCeremony,
         unwrapDek,
         webauthnSupported,
+        wrapAadText,
         wrapDek,
     } from "$lib/crypto";
     import type { KeyringMetadata, NoteApiState } from "$lib/types";
+    import { base64urlBytes, byteCount, shortUuid } from "./format";
     import Login from "./login.svelte";
     import Note from "./note.svelte";
     import Notice from "./notice.svelte";
-    import { logStore } from "./store";
+    import { fact, logStore, masked } from "./store";
     import type { PageData } from "./$types";
 
     type LockedState = Exclude<NoteApiState, { state: "absent" }>;
@@ -60,10 +68,6 @@
             : null,
     );
 
-    function elapsed(start: number): string {
-        return `${Math.round(performance.now() - start).toLocaleString()} ms`;
-    }
-
     async function readJson<T>(response: Response): Promise<T> {
         const body = await response.json().catch(() => null);
         if (!response.ok) {
@@ -91,11 +95,12 @@
         unlocked = null;
         prepared = null;
 
-        if (data.user === null) {
+        const user = data.user;
+        if (user === null) {
             phase = "locked";
             return;
         }
-        if (data.user.passkey === null) {
+        if (user.passkey === null) {
             phase = "unsupported";
             failure = {
                 kind: "unsupported",
@@ -111,18 +116,32 @@
             };
             return;
         }
+        const passkey = user.passkey;
 
         phase = "preparing";
         logStore.clear();
-        logStore.add("fetching encrypted note metadata");
+        logStore.add("fetching encrypted note metadata", {
+            details: [
+                fact("account", shortUuid(user.uuid)),
+                masked("credential id", passkey.credentialId),
+            ],
+        });
         try {
             const response = await fetch("/api/note", {
                 headers: { accept: "application/json" },
             });
             let state = await readJson<NoteApiState>(response);
             if (state.state === "absent") {
-                logStore.add("reserving random, public key-derivation inputs");
                 const setup = createSetupInputs();
+                logStore.add(
+                    `reserving two random ${SETUP_BYTES}-byte key-derivation inputs`,
+                    {
+                        details: [
+                            masked("prf input", setup.prfInput),
+                            masked("hkdf salt", setup.hkdfSalt),
+                        ],
+                    },
+                );
                 state = await readJson<NoteApiState>(
                     await fetch("/api/note/reserve", {
                         method: "POST",
@@ -141,25 +160,53 @@
             phase = "locked";
             logStore.add(
                 "encrypted note metadata ready; waiting for passkey verification",
+                {
+                    details: [
+                        fact("keyring", state.state),
+                        fact(
+                            "revision",
+                            state.state === "ready"
+                                ? state.note.revision.toLocaleString()
+                                : "none yet",
+                        ),
+                        masked("salt", state.keyring.hkdfSalt),
+                    ],
+                },
             );
         } catch (error) {
             if (error instanceof CredentialMismatchError) {
                 phase = "error";
                 failure = { kind: "credential", message: error.message };
                 logStore.add(
-                    "ERROR: SSO credential does not match the encrypted keyring",
+                    "SSO credential does not match the encrypted keyring",
+                    { level: "error" },
                 );
                 return;
             }
             console.error("note preparation failed", error);
             phase = "error";
-            failure =
-                error instanceof Error && error.message === "unauthorized"
-                    ? { kind: "session", message: "Your SSO session expired." }
-                    : {
-                          kind: "generic",
-                          message: "Could not prepare the encrypted note.",
-                      };
+            const expired =
+                error instanceof Error && error.message === "unauthorized";
+            failure = expired
+                ? { kind: "session", message: "Your SSO session expired." }
+                : {
+                      kind: "generic",
+                      message: "Could not prepare the encrypted note.",
+                  };
+            logStore.add(
+                expired
+                    ? "SSO session expired before the keyring was ready"
+                    : "could not prepare the encrypted note",
+                {
+                    level: "error",
+                    details: [
+                        fact(
+                            "cause",
+                            error instanceof Error ? error.message : "unknown",
+                        ),
+                    ],
+                },
+            );
         }
     }
 
@@ -167,17 +214,23 @@
         const user = data.user;
         const state = prepared;
         if (
-            user?.passkey === null ||
             user === null ||
+            user.passkey === null ||
             state === null ||
             phase === "unlocking"
         ) {
             return;
         }
+        const passkey = user.passkey;
 
         phase = "unlocking";
         failure = null;
-        logStore.add("requesting user-verified WebAuthn PRF output");
+        logStore.add("requesting user-verified WebAuthn PRF output", {
+            details: [
+                fact("rp id", passkey.rpId),
+                masked("prf input", state.keyring.prfInput),
+            ],
+        });
 
         try {
             const ceremonyStarted = performance.now();
@@ -185,30 +238,46 @@
             // Keep this as the first awaited operation: browsers receive the
             // WebAuthn request directly from the button's user gesture.
             const prfOutput = await runPrfCeremony(
-                user.passkey,
+                passkey,
                 state.keyring.prfInput,
                 ceremony.signal,
             );
             logStore.add(
-                `passkey verification completed in ${elapsed(ceremonyStarted)}`,
+                `passkey returned ${PRF_OUTPUT_BYTES} bytes of PRF output`,
+                { durationMs: performance.now() - ceremonyStarted },
             );
 
             const derivationStarted = performance.now();
             let kek: CryptoKey;
+            let kekFingerprint: string;
+            let derivationMs: number;
             try {
                 kek = await deriveKek(prfOutput, state.keyring, user.uuid);
+                derivationMs = performance.now() - derivationStarted;
+                kekFingerprint = await deriveKekFingerprint(
+                    prfOutput,
+                    state.keyring,
+                    user.uuid,
+                );
             } finally {
                 prfOutput.fill(0);
             }
             logStore.add(
-                `derived non-extractable AES-256-GCM key-encryption key with HKDF-SHA256 in ${elapsed(derivationStarted)}`,
+                "derived the non-extractable key-encryption key with HKDF-SHA256",
+                {
+                    durationMs: derivationMs,
+                    details: [
+                        masked("salt", state.keyring.hkdfSalt),
+                        masked("info", kekInfoText(user.uuid, state.keyring)),
+                        masked("kek", kekFingerprint),
+                    ],
+                },
             );
 
             let authoritative: NoteApiState;
             if (state.state === "pending") {
-                logStore.add(
-                    "generating and wrapping a random AES-256-GCM note key",
-                );
+                logStore.add("generating a random AES-256-GCM note key");
+                const wrapStarted = performance.now();
                 const freshDek = await generateDek();
                 const wrappedDek = await wrapDek(
                     freshDek,
@@ -222,6 +291,21 @@
                     kek,
                     state.keyring,
                     user.uuid,
+                );
+                logStore.add(
+                    `wrapped it into ${byteCount(base64urlBytes(wrappedDek.ct))}`,
+                    {
+                        durationMs: performance.now() - wrapStarted,
+                        details: [
+                            masked("iv", wrappedDek.iv),
+                            masked("wrapped dek", wrappedDek.ct),
+                            masked("aad", wrapAadText(user.uuid, state.keyring)),
+                            masked(
+                                "dek",
+                                await envelopeFingerprint(wrappedDek),
+                            ),
+                        ],
+                    },
                 );
                 const ciphertext = await encryptNote(
                     "",
@@ -264,7 +348,37 @@
                 authoritative.note.revision,
             );
             logStore.add(
-                `authenticated and decrypted note locally in ${elapsed(decryptStarted)}`,
+                `unwrapped the note key and decrypted revision ${authoritative.note.revision.toLocaleString()}`,
+                {
+                    durationMs: performance.now() - decryptStarted,
+                    details: [
+                        fact(
+                            "ciphertext",
+                            byteCount(
+                                base64urlBytes(authoritative.note.ciphertext.ct),
+                            ),
+                        ),
+                        fact(
+                            "plaintext",
+                            `${content.length.toLocaleString()} chars`,
+                        ),
+                        masked("iv", authoritative.note.ciphertext.iv),
+                        masked(
+                            "aad",
+                            noteAadText(
+                                user.uuid,
+                                authoritative.keyring,
+                                authoritative.note.revision,
+                            ),
+                        ),
+                        masked(
+                            "dek",
+                            await envelopeFingerprint(
+                                authoritative.keyring.wrappedDek,
+                            ),
+                        ),
+                    ],
+                },
             );
 
             prepared = authoritative;
@@ -300,7 +414,8 @@
                         "This passkey and browser combination does not provide WebAuthn PRF.",
                 };
                 logStore.add(
-                    "ERROR: WebAuthn PRF unavailable; no fallback is permitted",
+                    "WebAuthn PRF unavailable; no fallback is permitted",
+                    { level: "error" },
                 );
                 return;
             }
@@ -308,7 +423,8 @@
                 phase = "error";
                 failure = { kind: "credential", message: error.message };
                 logStore.add(
-                    "ERROR: SSO credential does not match the encrypted keyring",
+                    "SSO credential does not match the encrypted keyring",
+                    { level: "error" },
                 );
                 return;
             }
@@ -318,20 +434,35 @@
                     kind: "session",
                     message: "Your SSO session expired.",
                 };
-                logStore.add("ERROR: SSO session expired during unlock");
+                logStore.add("SSO session expired during unlock", {
+                    level: "error",
+                });
                 return;
             }
             console.error("note unlock failed", error);
             phase = "error";
+            const tampered =
+                error instanceof DOMException &&
+                error.name === "OperationError";
             failure = {
                 kind: "generic",
-                message:
-                    error instanceof DOMException &&
-                    error.name === "OperationError"
-                        ? "The encrypted note or wrapped key failed authentication."
-                        : "Could not unlock the encrypted note.",
+                message: tampered
+                    ? "The encrypted note or wrapped key failed authentication."
+                    : "Could not unlock the encrypted note.",
             };
-            logStore.add("ERROR: note unlock failed closed");
+            logStore.add("note unlock failed closed", {
+                level: "error",
+                details: [
+                    fact(
+                        "cause",
+                        tampered
+                            ? "AES-GCM authentication failed"
+                            : error instanceof Error
+                              ? error.message
+                              : "unknown",
+                    ),
+                ],
+            });
         } finally {
             ceremony = null;
         }
