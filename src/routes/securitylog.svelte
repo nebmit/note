@@ -155,7 +155,7 @@
             </button>
         </div>
         <div
-            class="flex min-h-0 flex-1 flex-col gap-[7px] overflow-y-auto px-[26px] pt-1 pb-3"
+            class="flex min-h-0 flex-1 flex-col gap-[7px] overflow-y-auto px-[26px] pt-1 pb-5"
             use:scrollToNewMessages={entries}
         >
             {#each entries as entry, i (entry.id)}
@@ -178,11 +178,6 @@
                     </div>
                 </div>
             {/each}
-        </div>
-        <div class="flex-none px-[26px] pb-[18px]">
-            <span class="font-mono text-[11px] leading-[1.5] text-ghost">
-                nothing here leaves the device
-            </span>
         </div>
     </div>
 
@@ -232,7 +227,7 @@
         >
             <span class="font-mono text-[11px] leading-[1.5] text-faint">
                 {entries.length.toLocaleString()}
-                {entries.length === 1 ? 'event' : 'events'} · nothing here leaves the device
+                {entries.length === 1 ? 'event' : 'events'}
             </span>
         </div>
     </div>

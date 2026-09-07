@@ -26,7 +26,7 @@
 
     const pending = $derived(phase === 'preparing' || phase === 'unlocking');
     const pendingLabel = $derived(
-        phase === 'preparing' ? 'Preparing your keyring' : 'Waiting for your passkey'
+        phase === 'preparing' ? 'Preparing keyring' : 'Waiting for passkey'
     );
 </script>
 
@@ -38,17 +38,10 @@
                 <Logo width="100%" animate />
             </div>
 
-            <div class="flex flex-col items-center gap-3">
-                <div
-                    class="indent-[.34em] font-extralight text-[34px] leading-none tracking-[.34em] text-ink select-none lg:text-[40px]"
-                >
-                    note
-                </div>
-                <p
-                    class="m-0 max-w-[400px] text-center text-[17px] leading-[1.6] font-light text-pretty text-muted"
-                >
-                    One private note, encrypted on your device.
-                </p>
+            <div
+                class="indent-[.34em] font-extralight text-[34px] leading-none tracking-[.34em] text-ink select-none lg:text-[40px]"
+            >
+                note
             </div>
 
             <div class="flex w-full flex-col items-center gap-4">
@@ -60,12 +53,9 @@
                     >
                         Sign in
                     </a>
-                    <span class="text-[13px] leading-[1.6] font-light text-dim">
-                        Your passkey opens it. No password to set.
-                    </span>
                 {:else}
                     <span class="text-[17px] leading-[1.6] font-light text-muted">
-                        Sign-in is currently unavailable.
+                        Sign-in is unavailable.
                     </span>
                 {/if}
             </div>
@@ -77,18 +67,13 @@
                 <Logo width="100%" animate />
             </div>
 
-            <div class="flex flex-col items-center gap-2.5">
-                <div class="text-[24px] leading-[1.3] font-light text-ink lg:text-[26px]">
-                    Welcome back
-                </div>
-                <div
-                    class="flex items-center gap-2 rounded-full border border-line bg-panel px-3 py-1.5"
-                >
-                    <span class="size-1.5 rounded-full bg-ok"></span>
-                    <span class="font-mono text-[12px] leading-none text-muted">
-                        {shortUuid(user.uuid)}
-                    </span>
-                </div>
+            <div
+                class="flex items-center gap-2 rounded-full border border-line bg-panel px-3 py-1.5"
+            >
+                <span class="size-1.5 rounded-full bg-ok"></span>
+                <span class="font-mono text-[12px] leading-none text-muted">
+                    {shortUuid(user.uuid)}
+                </span>
             </div>
 
             <div class="flex w-full flex-col items-center gap-3.5">
@@ -110,19 +95,6 @@
                         {retry ? 'Try again' : 'Unlock note'}
                     </button>
                 {/if}
-
-                <p
-                    class="m-0 max-w-[380px] text-center text-[14px] leading-[1.6] font-light text-dim"
-                >
-                    {#if phase === 'unlocking'}
-                        Finish in the prompt your browser opened.
-                    {:else}
-                        <span class="lg:hidden">Your phone asks every time you open the note.</span>
-                        <span class="hidden lg:inline">
-                            Your device asks every time you open the note.
-                        </span>
-                    {/if}
-                </p>
 
                 {#if error}
                     <p

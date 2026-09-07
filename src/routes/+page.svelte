@@ -119,7 +119,7 @@
             phase = "unsupported";
             failure = {
                 kind: "unsupported",
-                message: "This SSO account does not have exactly one passkey.",
+                message: "This account needs exactly one passkey.",
             };
             return;
         }
@@ -200,10 +200,10 @@
             const expired =
                 error instanceof Error && error.message === "unauthorized";
             failure = expired
-                ? { kind: "session", message: "Your SSO session expired." }
+                ? { kind: "session", message: "The session expired." }
                 : {
                       kind: "generic",
-                      message: "Could not prepare the encrypted note.",
+                      message: "Could not prepare the note.",
                   };
             logStore.add(
                 expired
@@ -430,7 +430,7 @@
                 phase = "locked";
                 failure = {
                     kind: "canceled",
-                    message: "Passkey verification was canceled.",
+                    message: "Passkey verification canceled.",
                 };
                 logStore.add("passkey verification canceled");
                 return;
@@ -443,7 +443,7 @@
                 failure = {
                     kind: "unsupported",
                     message:
-                        "This passkey and browser combination does not provide WebAuthn PRF.",
+                        "This passkey and browser do not provide WebAuthn PRF.",
                 };
                 logStore.add(
                     "WebAuthn PRF unavailable; no fallback is permitted",
@@ -464,7 +464,7 @@
                 phase = "error";
                 failure = {
                     kind: "session",
-                    message: "Your SSO session expired.",
+                    message: "The session expired.",
                 };
                 logStore.add("SSO session expired during unlock", {
                     level: "error",
@@ -479,8 +479,8 @@
             failure = {
                 kind: "generic",
                 message: tampered
-                    ? "The encrypted note or wrapped key failed authentication."
-                    : "Could not unlock the encrypted note.",
+                    ? "The note or its key failed authentication."
+                    : "Could not unlock the note.",
             };
             logStore.add("note unlock failed closed", {
                 level: "error",

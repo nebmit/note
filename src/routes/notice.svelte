@@ -41,29 +41,27 @@
 
         <div class="flex flex-col gap-2.5">
             {#if kind === 'session'}
-                <div class="text-[24px] leading-[1.3] font-light text-ink">
-                    Locked while you were away
-                </div>
+                <div class="text-[24px] leading-[1.3] font-light text-ink">Locked</div>
                 <p class="m-0 text-[15px] leading-[1.65] font-light text-pretty text-muted">
-                    Your sign-in lapsed, so the key was dropped.{revision === null
+                    The sign-in lapsed, so the key was dropped.{revision === null
                         ? ''
                         : ` Revision ${revision.toLocaleString()} is still stored.`}
                 </p>
             {:else if kind === 'credential'}
                 <div class="text-[24px] leading-[1.3] font-light text-ink lg:text-[26px]">
-                    This passkey doesn't open this note
+                    Wrong passkey
                 </div>
                 <p class="m-0 text-[15px] leading-[1.65] font-light text-pretty text-muted">
                     The note was encrypted for a different passkey on this account. Nothing
-                    was changed, and nothing can be read without the original one.
+                    was changed. Without the original passkey it stays unreadable.
                 </p>
             {:else}
                 <div class="text-[24px] leading-[1.3] font-light text-ink lg:text-[26px]">
-                    This device can't open the note
+                    This device cannot open it
                 </div>
                 <p class="m-0 text-[15px] leading-[1.65] font-light text-pretty text-muted">
-                    {detail} The note only opens with a WebAuthn passkey that provides PRF —
-                    there is deliberately no password fallback.
+                    {detail} The note needs a WebAuthn passkey with PRF. There is no password
+                    fallback.
                 </p>
             {/if}
         </div>
@@ -75,7 +73,7 @@
                     href={signInUrl}
                     data-sveltekit-reload
                 >
-                    {kind === 'session' ? 'Sign in again' : 'Sign in with the original passkey'}
+                    {kind === 'session' ? 'Sign in again' : 'Sign in'}
                 </a>
             {/if}
             {#if kind === 'unsupported' && signOutUrl}
@@ -91,11 +89,11 @@
 
         <span class="font-mono text-[11px] leading-[1.5] text-faint">
             {#if kind === 'session'}
-                key discarded · 0 plaintext in storage
+                key discarded
             {:else if kind === 'credential'}
-                keyring credential id ≠ session passkey · editing disabled
+                credential id ≠ session passkey · editing disabled
             {:else}
-                webauthn prf unavailable · no fallback permitted
+                webauthn prf unavailable
             {/if}
         </span>
     </div>

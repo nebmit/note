@@ -89,20 +89,20 @@
                 return { label: 'Saved', dot: 'bg-ok', pulse: false };
             case 'exiting':
                 return {
-                    label: dirty ? 'Securing changes…' : 'Locking…',
+                    label: dirty ? 'Saving…' : 'Locking…',
                     dot: 'bg-muted',
                     pulse: true
                 };
             case 'conflict':
                 return { label: 'Newer version elsewhere', dot: 'bg-muted', pulse: false };
             case 'offline':
-                return { label: "Can't reach the server", dot: 'bg-muted', pulse: false };
+                return { label: 'Cannot reach the server', dot: 'bg-muted', pulse: false };
             case 'credential-mismatch':
-                return { label: "This passkey doesn't fit", dot: 'bg-muted', pulse: false };
+                return { label: 'Wrong passkey', dot: 'bg-muted', pulse: false };
             case 'session-expired':
                 return { label: 'Signed out elsewhere', dot: 'bg-muted', pulse: false };
             case 'error':
-                return { label: "Couldn't save", dot: 'bg-muted', pulse: false };
+                return { label: 'Could not save', dot: 'bg-muted', pulse: false };
         }
     });
 
@@ -118,15 +118,15 @@
     const exitReason = $derived.by(() => {
         switch (savestate) {
             case 'offline':
-                return "The server couldn't be reached.";
+                return 'Could not reach the server.';
             case 'conflict':
-                return "Another tab saved a newer version, so this one wasn't stored.";
+                return 'Another tab saved a newer version, so this one was not stored.';
             case 'session-expired':
-                return 'Your sign-in lapsed before the save went through.';
+                return 'The sign-in lapsed before the save went through.';
             case 'credential-mismatch':
                 return 'This passkey no longer matches the stored note.';
             default:
-                return "The last save didn't go through.";
+                return 'The last save did not go through.';
         }
     });
 
@@ -254,8 +254,8 @@
                 pendingSaveAttempt = null;
                 savestate = 'credential-mismatch';
                 fatal = {
-                    title: "This passkey no longer opens this note",
-                    body: 'The SSO passkey stopped matching the encrypted keyring, so editing is disabled to prevent an unsafe overwrite. Copy anything you need before signing out.'
+                    title: 'Wrong passkey',
+                    body: 'The passkey stopped matching the keyring. Editing is off so nothing overwrites the stored note. Copy the text before signing out.'
                 };
                 logStore.add('SSO credential no longer matches the keyring', {
                     level: 'error',
@@ -271,8 +271,8 @@
                 if (response.status === 401) {
                     savestate = 'session-expired';
                     fatal = {
-                        title: 'Your sign-in lapsed',
-                        body: 'The note could not be saved because the SSO session expired. Your text is still here — copy anything you want to keep, then sign in again.'
+                        title: 'Sign-in lapsed',
+                        body: 'The session expired, so the save did not go through. The text is still here. Copy it, then sign in again.'
                     };
                     logStore.add('SSO session expired before save', { level: 'error' });
                 } else {
@@ -494,11 +494,11 @@
                     <span class="mt-[9px] size-[7px] flex-none rounded-full bg-muted"></span>
                     <div class="flex flex-1 flex-col gap-2.5">
                         <span class="text-[17px] leading-[1.4] text-ink">
-                            Another tab saved a newer version of this note
+                            Another tab saved a newer version
                         </span>
                         <span class="text-[15px] leading-[1.6] font-light text-pretty text-muted">
-                            Your edits here are held in this tab and haven't been stored. Reopening
-                            loads the newer version — copy anything you want to keep first.
+                            These edits are held in this tab and were never stored. Reopening
+                            loads the newer version, so copy the text first.
                         </span>
                         <div class="mt-1.5 flex flex-wrap gap-3">
                             <button
@@ -506,20 +506,20 @@
                                 type="button"
                                 onclick={() => void copyMyVersion()}
                             >
-                                {copied === 'ok' ? 'Copied' : 'Copy my version'}
+                                {copied === 'ok' ? 'Copied' : 'Copy unsaved text'}
                             </button>
                             <button
                                 class="h-11 rounded-full border border-line-strong px-[22px] text-[15px] leading-none font-normal text-muted transition-colors hover:border-ghost hover:text-ink"
                                 type="button"
                                 onclick={reopenWithNewer}
                             >
-                                Discard mine and open newer
+                                Discard and open newer
                             </button>
                         </div>
                         {#if copied === 'failed'}
                             <span class="text-[13px] leading-[1.5] font-light text-notice">
-                                Couldn't reach the clipboard — select the text below and copy it
-                                by hand.
+                                Could not reach the clipboard. Select the text and copy it by
+                                hand.
                             </span>
                         {/if}
                     </div>
@@ -544,28 +544,11 @@
                 class="min-h-0 w-full flex-1 resize-none bg-transparent text-[17px] leading-[1.8] font-light outline-none placeholder:text-faint lg:text-[18px] lg:leading-[1.85] {blocked
                     ? 'text-faint'
                     : 'text-ink'}"
-                placeholder="Start typing. It encrypts as you go."
+                placeholder="Start typing"
                 readonly={blocked || pendingExit !== null}
                 bind:value={content}
                 oninput={scheduleSave}
             ></textarea>
-
-            {#if isNewNote && !blocked}
-                <!-- 6k — the one thing worth saying before the first save. -->
-                <div
-                    class="mt-auto mb-3.5 flex flex-col gap-1.5 rounded-[18px] border border-line bg-panel px-[18px] py-4 lg:mb-0"
-                >
-                    <span
-                        class="font-mono text-[11px] leading-none tracking-[.14em] text-mark uppercase"
-                    >
-                        how it opens
-                    </span>
-                    <span class="text-[14px] leading-[1.6] font-light text-pretty text-muted">
-                        This note is tied to the passkey you just used. Keep that passkey and you
-                        keep the note.
-                    </span>
-                </div>
-            {/if}
         </div>
     </div>
 
@@ -573,7 +556,7 @@
         bind:open={logOpen}
         dot={status.dot}
         pulse={status.pulse}
-        placeholder={isNewNote ? 'waiting for your first save' : null}
+        placeholder={isNewNote ? 'waiting for first save' : null}
     />
 </div>
 
@@ -585,13 +568,13 @@
             class="relative flex w-full flex-col gap-[18px] rounded-t-3xl border-t border-line bg-panel px-[22px] py-[26px] pb-[max(26px,env(safe-area-inset-bottom))] lg:max-w-[460px] lg:rounded-3xl lg:border lg:pb-[26px]"
             role="alertdialog"
             aria-modal="true"
-            aria-label="Your last changes didn't save"
+            aria-label="The last changes did not save"
         >
             <div class="h-1 w-9 self-center rounded-full bg-line-strong lg:hidden"></div>
 
             <div class="flex flex-col gap-2">
                 <span class="text-[19px] leading-[1.35] text-ink">
-                    Your last changes didn't save
+                    The last changes did not save
                 </span>
                 <span class="text-[15px] leading-[1.6] font-light text-pretty text-muted">
                     {exitReason}
